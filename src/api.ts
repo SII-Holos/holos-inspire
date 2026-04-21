@@ -477,14 +477,16 @@ export namespace InspireAPI {
     workspaceId: string,
     opts?: { search?: string; imageType?: string; page?: number; pageSize?: number },
   ): Promise<{ images: any[]; total: number }> {
+    const filter: Record<string, any> = {}
+    if (opts?.search) filter.name = opts.search
+    if (opts?.imageType) filter.source = opts.imageType
     const payload: Record<string, any> = {
       page_size: opts?.pageSize ?? 50,
       page: opts?.page ?? 1,
+      filter,
     }
-    if (opts?.search) payload.keyword = opts.search
-    if (opts?.imageType) payload.image_type = opts.imageType
     const data = await postInternal("/api/v1/image/list", payload, cookie, workspaceId)
-    return { images: data.images ?? data.list ?? data.items ?? [], total: data.total ?? 0 }
+    return { images: data.images ?? [], total: data.total ?? 0 }
   }
 
   export async function getNotebookDetail(cookie: string, notebookId: string): Promise<any> {

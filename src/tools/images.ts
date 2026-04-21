@@ -77,10 +77,15 @@ async function executePlatform(params: {
     }),
   )
 
-  const IMAGE_TYPE_LABELS: Record<string, string> = {
+  const VISIBILITY_LABELS: Record<string, string> = {
+    VISIBILITY_PRIVATE: "个人可见",
+    VISIBILITY_PUBLIC: "公开可见",
+  }
+
+  const SOURCE_LABELS: Record<string, string> = {
     SOURCE_OFFICIAL: "官方",
-    SOURCE_PRIVATE: "个人可见",
-    SOURCE_PUBLIC: "公开可见",
+    SOURCE_PRIVATE: "个人上传",
+    SOURCE_PUBLIC: "公开",
   }
 
   const header = params.search ? `=== 平台镜像搜索: "${params.search}" ===` : `=== 平台已注册镜像 ===`
@@ -92,12 +97,17 @@ async function executePlatform(params: {
 
   for (let i = 0; i < result.images.length; i++) {
     const img = result.images[i]
-    const name = img.image_name ?? img.name ?? "unknown"
-    const tag = img.image_tag ?? img.tag ?? "latest"
-    const typeLabel = IMAGE_TYPE_LABELS[img.image_type ?? img.source_type ?? ""] ?? img.image_type ?? "未知"
-    const address = img.image_url ?? img.image_address ?? img.address ?? ""
-    lines.push(`${offset + i + 1}. ${name}:${tag}`)
-    lines.push(`   类型: ${typeLabel} | 地址: ${address}`)
+    const displayName = img.name ?? "unknown"
+    const address = img.address ?? ""
+    const visibility = VISIBILITY_LABELS[img.visibility] ?? img.visibility ?? ""
+    const source = SOURCE_LABELS[img.source] ?? img.source ?? ""
+    const region = Array.isArray(img.region) ? img.region.join(", ") : ""
+    const size = img.size ?? ""
+
+    lines.push(`${offset + i + 1}. ${displayName}`)
+    lines.push(`   地址: ${address}`)
+    const tags = [visibility, source, region, size].filter(Boolean).join(" | ")
+    if (tags) lines.push(`   ${tags}`)
     if (img.description) lines.push(`   描述: ${img.description}`)
     lines.push("")
   }
