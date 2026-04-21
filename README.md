@@ -1,62 +1,59 @@
 # holos-inspire
 
-A [Synergy](https://github.com/ericsanchezok/synergy) plugin that connects to SII 启智平台 (qz.sii.edu.cn) — an academic GPU cluster for AI research. Gives the Synergy agent direct control over GPU/HPC job submission, image management, resource monitoring, and inference deployment.
+A [Synergy](https://github.com/ericsanchezok/synergy) plugin for SII 启智平台 (qz.sii.edu.cn) — an academic GPU cluster for AI research. Gives the Synergy agent direct control over GPU/HPC job submission, Docker image management, resource monitoring, notebook environments, and inference deployment.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
-| `inspire_status` | Query projects, workspaces, GPU resources, and constraints |
-| `inspire_config` | Read/write plugin defaults (project, workspace, image, etc.) |
-| `inspire_submit` | Submit GPU training tasks via OpenAPI |
-| `inspire_submit_hpc` | Submit HPC/CPU tasks (Slurm) |
-| `inspire_inference` | Deploy and manage inference services |
-| `inspire_jobs` | List tasks with status filtering and pagination |
-| `inspire_job_detail` | Get detailed task info with failure diagnostics |
-| `inspire_logs` | Query or download training job logs |
+| `inspire_status` | Discover projects, workspaces, compute groups, and available resource specs |
+| `inspire_config` | Read/write plugin defaults (project, workspace, image, priority, etc.) |
+| `inspire_submit` | Submit GPU training tasks |
+| `inspire_submit_hpc` | Submit HPC/CPU tasks (Slurm scheduling) |
+| `inspire_inference` | Deploy and manage model inference services |
+| `inspire_jobs` | List tasks with status filtering, spec_id, and compute group info |
+| `inspire_job_detail` | Detailed task info with failure diagnostics |
+| `inspire_logs` | Query or download job logs |
 | `inspire_metrics` | GPU utilization metrics with health assessment |
 | `inspire_stop` | Stop tasks (single or batch) |
-| `inspire_images` | Browse Docker images in Harbor registry |
-| `inspire_image_push` | Push local Docker images to Harbor |
-| `inspire_notebook` | Manage Jupyter notebook environments |
+| `inspire_images` | Browse platform-registered images or raw Harbor registry |
+| `inspire_image_push` | Push local Docker images to Harbor (七宝 or 松江) |
+| `inspire_notebook` | Manage interactive notebook environments |
 | `inspire_models` | Manage the platform model repository |
 
-The plugin also provides a built-in skill (`sii-inspire`) with a platform guide, troubleshooting reference, and distributed training documentation.
+Includes a built-in skill (`sii-inspire`) with platform guide, troubleshooting reference, and distributed training documentation.
 
 ## Installation
 
-Install the package, then register it in your Synergy config:
-
-```bash
-bun add holos-inspire
-```
+Add to your Synergy config:
 
 ```jsonc
 // synergy.jsonc
 {
-  "plugin": ["holos-inspire"]
+  "plugin": ["github:SII-Holos/holos-inspire"]
 }
 ```
 
+Synergy will install the plugin automatically on startup.
+
 ## Authentication
 
-The platform requires CAS credentials (学工号 + password). Log in through the Synergy CLI:
+Platform credentials (学工号 + password) are required. Log in via CLI:
 
 ```bash
 synergy inspire login
 ```
 
-If you need to push Docker images to Harbor, authenticate separately:
+For Docker image push, Harbor credentials are separate (find them under 镜像管理 → 本地推送):
 
 ```bash
-synergy inspire harbor-login
+synergy inspire harbor-login                  # 七宝 (default, all spaces except SJ)
+synergy inspire harbor-login --registry sj    # 松江 (SJ资源空间 only)
 ```
-
-Both commands will prompt for credentials interactively. Credentials are stored locally and encrypted.
 
 ## Configuration
 
-Set defaults to avoid repeating parameters on every tool call. These can be configured in `synergy.jsonc` or at runtime via `inspire_config`:
+Set defaults to simplify repeated tool calls:
 
 ```jsonc
 // synergy.jsonc
@@ -65,10 +62,8 @@ Set defaults to avoid repeating parameters on every tool call. These can be conf
     "inspire": {
       "defaultProject": "your-project-name",
       "defaultWorkspace": "分布式训练空间",
-      "defaultComputeGroup": "cuda12.8版本H100",
-      "defaultImage": "docker-qb.sii.edu.cn/inspire-studio/your-image:tag",
-      "defaultSpecId": "quota-id-from-platform",
-      "defaultPriority": 5,
+      "defaultImage": "docker.sii.shaipower.online/inspire-studio/your-image:tag",
+      "defaultPriority": 9,
       "defaultShm": 1200,
       "commandPrefix": "source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && cd /inspire/hdd/project/xxx/code"
     }
@@ -76,23 +71,56 @@ Set defaults to avoid repeating parameters on every tool call. These can be conf
 }
 ```
 
-The `commandPrefix` is particularly useful — it eliminates repetitive environment setup in every job command. With it set, `inspire_submit` only needs a task name and the training command itself.
+`commandPrefix` eliminates repetitive environment setup — `inspire_submit` automatically prepends it to every command.
 
-A typical first-time setup: run `inspire_status` to discover available projects and resources, then configure defaults based on what it returns.
+Note: `spec_id` and `compute_group` are **not** stored as defaults because they vary by workspace and task type. Use `inspire_status` to see available options, then pass them directly.
 
-## Platform Notes
+## Platform Essentials
 
-- **Offline workspaces**: 分布式训练空间 has no internet access. All dependencies must be pre-installed in the Docker image.
-- **Non-interactive shell**: `~/.bashrc` is not loaded. Initialize your environment explicitly in the command or via `commandPrefix`.
-- **Distributed training**: The platform injects `MASTER_ADDR`, `PET_NNODES`, `PET_NODE_RANK`, and `PET_NPROC_PER_NODE` automatically.
-- **Network requirement**: Most API calls require campus network or VPN access.
+### Image Registries
+
+Two independent registries (push domain → display domain):
+
+| Registry | Push Domain | Display Domain | Spaces |
+|----------|------------|---------------|--------|
+| Main | `docker-qb.sii.edu.cn` | `docker.sii.shaipower.online` | All except SJ |
+| SJ | `docker-t.sii.edu.cn` | `docker-t.sii.shaipower.online` | SJ资源空间 only |
+
+After `docker push`, you **must** register the image on the platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号. Submit tasks using the **display domain**, not the push domain.
+
+### Resource Specs
+
+Each task type has its own spec list. Omit the `spec` parameter in any submit tool to see available specs:
+
+| Task Type | Schedule Type |
+|-----------|--------------|
+| GPU Training | `SCHEDULE_CONFIG_TYPE_TRAIN` |
+| HPC/Slurm | `SCHEDULE_CONFIG_TYPE_HPC` |
+| Notebook | `SCHEDULE_CONFIG_TYPE_DSW` |
+
+### Workspace Network
+
+| Has Internet | Spaces |
+|-------------|--------|
+| ✅ | 可上网GPU资源, CPU资源空间, 国产卡, PPU, 专属资源开发空间, SJ资源空间 |
+| ❌ | 分布式训练空间, 高性能计算, 整节点任务空间 |
+
+Offline spaces: no `pip install`, `git clone`, or `wget` in commands. All dependencies must be in the Docker image. Storage (`/inspire/hdd/project/`) is shared across all spaces in the same project.
+
+### Distributed Training
+
+The platform auto-injects environment variables: `MASTER_ADDR`, `MASTER_PORT`, `PET_NNODES`, `PET_NODE_RANK`, `PET_NPROC_PER_NODE`. Use them directly in `torchrun` / `deepspeed` commands.
 
 ## Development
 
 ```bash
 bun install
-bun run typecheck
+bun run typecheck    # or: bunx tsc --noEmit
 ```
+
+Branch protection: `main` requires `typecheck` CI to pass. Use PRs for changes.
+
+Release: trigger the Release workflow in GitHub Actions with a version number.
 
 ## License
 
