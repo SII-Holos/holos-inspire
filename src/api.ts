@@ -475,11 +475,11 @@ export namespace InspireAPI {
   export async function listPlatformImages(
     cookie: string,
     workspaceId: string,
-    opts?: { search?: string; imageType?: string; pageNum?: number; pageSize?: number },
+    opts?: { search?: string; imageType?: string; page?: number; pageSize?: number },
   ): Promise<{ images: any[]; total: number }> {
     const payload: Record<string, any> = {
-      page_num: opts?.pageNum ?? 1,
       page_size: opts?.pageSize ?? 50,
+      page: opts?.page ?? 1,
     }
     if (opts?.search) payload.keyword = opts.search
     if (opts?.imageType) payload.image_type = opts.imageType

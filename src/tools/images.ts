@@ -72,7 +72,7 @@ async function executePlatform(params: {
   const result = await InspireAuth.withCookieRetry((cookie: string) =>
     InspireAPI.listPlatformImages(cookie, ws.id, {
       search: params.search,
-      pageNum,
+      page: pageNum,
       pageSize: limit,
     }),
   )

@@ -14,7 +14,7 @@ const VALID_KEYS = [
 type ConfigKey = (typeof VALID_KEYS)[number]
 
 const KEY_DESCRIPTIONS: Record<ConfigKey, string> = {
-  defaultProject: "默认项目名称（如 '大模型时代下的多智能体系统'）",
+  defaultProject: "默认项目名称",
   defaultWorkspace: "默认工作空间（如 '分布式训练空间'）",
   defaultImage: "默认训练镜像（平台注册后的地址，如 'docker.sii.shaipower.online/inspire-studio/xxx:v1'）",
   defaultPriority: "默认任务优先级（数字 1-10，通常为项目最大值）",
