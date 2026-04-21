@@ -475,14 +475,15 @@ export namespace InspireAPI {
   export async function listPlatformImages(
     cookie: string,
     workspaceId: string,
-    opts?: { search?: string; imageType?: string; page?: number; pageSize?: number },
+    opts?: { search?: string; imageType?: string },
   ): Promise<{ images: any[]; total: number }> {
-    const filter: Record<string, any> = {}
-    if (opts?.search) filter.name = opts.search
+    const filter: Record<string, any> = {
+      registry_hint: { workspace_id: workspaceId },
+    }
     if (opts?.imageType) filter.source = opts.imageType
     const payload: Record<string, any> = {
-      page_size: Math.min(opts?.pageSize ?? 10, 10),
-      page: opts?.page ?? 1,
+      page_size: -1,
+      page: 0,
       filter,
     }
     const data = await postInternal("/api/v1/image/list", payload, cookie, workspaceId)

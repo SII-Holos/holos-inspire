@@ -65,26 +65,20 @@ async function executePlatform(params: {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const limit = Math.min(params.limit ?? 10, 10)
+  const limit = params.limit ?? 20
   const offset = params.offset ?? 0
   const search = params.search?.toLowerCase()
 
-  let allImages: any[] = []
-  let total = 0
-  let page = 1
-  while (true) {
-    const batch = await InspireAuth.withCookieRetry((cookie: string) =>
-      InspireAPI.listPlatformImages(cookie, ws.id, { page, pageSize: 10 }),
-    )
-    total = batch.total
-    allImages.push(...batch.images)
-    if (allImages.length >= total || batch.images.length === 0) break
-    page++
-  }
+  const result = await InspireAuth.withCookieRetry((cookie: string) =>
+    InspireAPI.listPlatformImages(cookie, ws.id, {}),
+  )
+
+  let allImages = result.images
+  let total = result.total
 
   if (search) {
     allImages = allImages.filter(
-      (img) =>
+      (img: any) =>
         (img.name ?? "").toLowerCase().includes(search) ||
         (img.address ?? "").toLowerCase().includes(search),
     )
