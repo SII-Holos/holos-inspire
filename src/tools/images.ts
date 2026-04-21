@@ -65,17 +65,33 @@ async function executePlatform(params: {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const limit = Math.min(params.limit ?? 20, 100)
+  const limit = Math.min(params.limit ?? 10, 10)
   const offset = params.offset ?? 0
-  const pageNum = Math.floor(offset / limit) + 1
+  const search = params.search?.toLowerCase()
 
-  const result = await InspireAuth.withCookieRetry((cookie: string) =>
-    InspireAPI.listPlatformImages(cookie, ws.id, {
-      search: params.search,
-      page: pageNum,
-      pageSize: limit,
-    }),
-  )
+  let allImages: any[] = []
+  let total = 0
+  let page = 1
+  while (true) {
+    const batch = await InspireAuth.withCookieRetry((cookie: string) =>
+      InspireAPI.listPlatformImages(cookie, ws.id, { page, pageSize: 10 }),
+    )
+    total = batch.total
+    allImages.push(...batch.images)
+    if (allImages.length >= total || batch.images.length === 0) break
+    page++
+  }
+
+  if (search) {
+    allImages = allImages.filter(
+      (img) =>
+        (img.name ?? "").toLowerCase().includes(search) ||
+        (img.address ?? "").toLowerCase().includes(search),
+    )
+    total = allImages.length
+  }
+
+  const pageImages = allImages.slice(offset, offset + limit)
 
   const VISIBILITY_LABELS: Record<string, string> = {
     VISIBILITY_PRIVATE: "个人可见",
@@ -91,12 +107,12 @@ async function executePlatform(params: {
   const header = params.search ? `=== 平台镜像搜索: "${params.search}" ===` : `=== 平台已注册镜像 ===`
   const lines = [
     header,
-    `共 ${result.total} 个镜像（显示 ${offset + 1}-${offset + result.images.length}）:`,
+    `共 ${total} 个镜像（显示 ${offset + 1}-${offset + pageImages.length}）:`,
     "",
   ]
 
-  for (let i = 0; i < result.images.length; i++) {
-    const img = result.images[i]
+  for (let i = 0; i < pageImages.length; i++) {
+    const img = pageImages[i]
     const displayName = img.name ?? "unknown"
     const address = img.address ?? ""
     const visibility = VISIBILITY_LABELS[img.visibility] ?? img.visibility ?? ""
@@ -112,17 +128,17 @@ async function executePlatform(params: {
     lines.push("")
   }
 
-  if (result.total > offset + result.images.length) {
-    lines.push(`用 offset=${offset + result.images.length} 查看下一页`)
+  if (total > offset + pageImages.length) {
+    lines.push(`用 offset=${offset + pageImages.length} 查看下一页`)
     lines.push("")
   }
 
   lines.push('提示: 平台注册的镜像可直接用于 inspire_submit。使用 source="harbor" 查看 Harbor 原始镜像。')
 
   return {
-    title: `${result.images.length} 个平台镜像`,
+    title: `${pageImages.length} 个平台镜像`,
     output: lines.join("\n"),
-    metadata: { source: "platform" as const, total: result.total, shown: result.images.length, offset, limit },
+    metadata: { source: "platform" as const, total, shown: pageImages.length, offset, limit },
   }
 }
 
