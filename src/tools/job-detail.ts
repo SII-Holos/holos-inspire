@@ -58,12 +58,10 @@ export const inspireJobDetail = tool({
 
 async function handleGpuDetail(jobId: string) {
   let job: any
-  let usedOpenAPI = false
 
   try {
     const token = await InspireAuth.ensureToken()
     job = await InspireAuth.withTokenRetry((t) => InspireAPI.getJobDetailOpenAPI(t, jobId))
-    usedOpenAPI = true
   } catch {
     try {
       job = await InspireAuth.withCookieRetry((cookie) => InspireAPI.getJobDetail(cookie, jobId))
@@ -276,12 +274,9 @@ async function handleGpuDetail(jobId: string) {
 
 async function handleHpcDetail(jobId: string) {
   let job: any
-  let usedOpenAPI = false
-
   try {
     const token = await InspireAuth.ensureToken()
     job = await InspireAuth.withTokenRetry((t) => InspireAPI.getHpcJobDetailOpenAPI(t, jobId))
-    usedOpenAPI = true
   } catch {
     return {
       title: "查询失败",

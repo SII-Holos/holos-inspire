@@ -46,7 +46,12 @@ export const inspireLogs = tool({
       }
     }
 
-    const cookie = await InspireAuth.requireCookie()
+    let cookie: string
+    try {
+      cookie = await InspireAuth.requireCookie()
+    } catch {
+      return InspireAuth.notAuthenticatedError("inspire")
+    }
 
     const instanceCount = await resolveInstanceCount(cookie, params.job_id)
 

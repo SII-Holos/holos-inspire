@@ -276,7 +276,12 @@ async function handleCreate(params: any) {
     }
   }
 
-  const cookie = await InspireAuth.requireCookie()
+  let cookie: string
+  try {
+    cookie = await InspireAuth.requireCookie()
+  } catch {
+    return InspireAuth.notAuthenticatedError("inspire")
+  }
 
   const body: Record<string, any> = {
     workspace_id: ws.id,

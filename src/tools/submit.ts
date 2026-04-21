@@ -148,16 +148,20 @@ export const inspireSubmit = tool({
       )
     }
 
-    const isSongjangImage = image.includes("docker.sii.shaipower.online")
-    const isQibaoImage = image.includes("docker-qb.sii.edu.cn")
-    const isSongjangSpace = ws.name.includes("SJ") || ws.name.includes("松江")
-    if (isSongjangImage && !isSongjangSpace) {
+    const isSjImage = image.includes("docker-t.sii.shaipower.online")
+    const isPushDomain = image.includes("docker-qb.sii.edu.cn") || image.includes("docker-t.sii.edu.cn")
+    const isSjSpace = ws.name.includes("SJ") || ws.name.includes("松江")
+    if (isSjImage && !isSjSpace) {
       warnings.push(
-        "⚠ 镜像地址为松江仓库(docker.sii.shaipower.online)，但目标空间可能在七宝集群。镜像拉取可能失败。七宝空间请使用 docker-qb.sii.edu.cn 的镜像。",
+        "⚠ 镜像地址为 SJ 资源空间专用仓库(docker-t.sii.shaipower.online)，但目标空间不在松江集群。请使用 docker.sii.shaipower.online 的镜像。",
       )
-    } else if (isQibaoImage && isSongjangSpace) {
+    } else if (!isSjImage && isSjSpace && !isPushDomain) {
       warnings.push(
-        "⚠ 镜像地址为七宝仓库(docker-qb.sii.edu.cn)，但目标空间在松江集群。镜像拉取可能失败。松江空间请使用 docker.sii.shaipower.online 的镜像。",
+        "⚠ 目标空间为 SJ 资源空间（松江集群），但镜像地址不是松江仓库。SJ 空间请使用 docker-t.sii.shaipower.online 的镜像。",
+      )
+    } else if (isPushDomain) {
+      warnings.push(
+        "⚠ 镜像地址使用了推送域名，请使用平台注册后的显示地址（docker.sii.shaipower.online/... 或 docker-t.sii.shaipower.online/...）。",
       )
     }
 

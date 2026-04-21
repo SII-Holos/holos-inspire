@@ -4,7 +4,6 @@ import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
-import { InspireNormalize } from "../normalize"
 import { InspireTypes } from "../types"
 import { listAvailableSpecs, requireAuth } from "../shared"
 

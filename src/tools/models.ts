@@ -58,8 +58,7 @@ async function handleList(params: any) {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const cookie = await InspireAuth.requireCookie()
-  const { items, total } = await InspireAuth.withCookieRetry((c) =>
+  const { items, total } = await InspireAuth.withCookieRetry((c: string) =>
     InspireAPI.listModels(c, ws.id, {
       page: Math.floor((params.offset ?? 0) / (params.limit ?? 20)) + 1,
       pageSize: Math.min(params.limit ?? 20, 100),
@@ -143,10 +142,9 @@ async function handleDetail(params: any) {
     }
   }
 
-  const cookie = await InspireAuth.requireCookie()
   let model: any
   try {
-    model = await InspireAuth.withCookieRetry((c) => InspireAPI.getModelDetail(c, params.model_id!))
+    model = await InspireAuth.withCookieRetry((c: string) => InspireAPI.getModelDetail(c, params.model_id!))
   } catch (err: any) {
     return {
       title: "查询失败",
@@ -232,8 +230,6 @@ async function handleCreate(params: any) {
   if (!("proj" in projResult)) return projResult
   const proj = projResult.proj
 
-  const cookie = await InspireAuth.requireCookie()
-
   const body: Record<string, any> = {
     workspace_id: ws.id,
     project_id: proj.id,
@@ -285,9 +281,8 @@ async function handleDelete(params: any) {
     }
   }
 
-  const cookie = await InspireAuth.requireCookie()
   try {
-    await InspireAuth.withCookieRetry((c) => InspireAPI.deleteModel(c, params.model_id!))
+    await InspireAuth.withCookieRetry((c: string) => InspireAPI.deleteModel(c, params.model_id!))
   } catch (err: any) {
     return {
       title: "删除失败",
