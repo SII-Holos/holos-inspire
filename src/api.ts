@@ -481,7 +481,7 @@ export namespace InspireAPI {
     if (opts?.search) filter.name = opts.search
     if (opts?.imageType) filter.source = opts.imageType
     const payload: Record<string, any> = {
-      page_size: opts?.pageSize ?? 50,
+      page_size: Math.min(opts?.pageSize ?? 10, 10),
       page: opts?.page ?? 1,
       filter,
     }
