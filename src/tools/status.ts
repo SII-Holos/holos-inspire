@@ -144,9 +144,12 @@ export const inspireStatus = tool({
               lines.push(`        - ${g.name} (${g.id}): ${gpuInfo}`)
 
               try {
-                const cachedSpecId = InspireCache.getCachedSpecId(space.id, g.id)
-                if (cachedSpecId) {
-                  lines.push(`          已知规格 ID: ${cachedSpecId}`)
+                const specs = await InspireCache.resolveAvailableSpecs(space.id, g.id)
+                if (specs.length > 0) {
+                  lines.push("          可用规格:")
+                  for (const s of specs) {
+                    lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
+                  }
                 }
               } catch {}
             }

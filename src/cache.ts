@@ -68,28 +68,31 @@ export namespace InspireCache {
     }
   }
 
+  export async function resolveAvailableSpecs(
+    workspaceId: string,
+    computeGroupId: string,
+  ): Promise<InspireAPI.ResourceSpec[]> {
+    try {
+      return await InspireAuth.withCookieRetry((cookie) =>
+        InspireAPI.listResourceSpecs(cookie, workspaceId, computeGroupId),
+      )
+    } catch {
+      return []
+    }
+  }
+
   export async function resolveSpecId(workspaceId: string, computeGroupId: string): Promise<string | undefined> {
     const cached = getCachedSpecId(workspaceId, computeGroupId)
     if (cached) return cached
 
-    try {
-      const { jobs } = await InspireAuth.withCookieRetry((cookie) =>
-        InspireAPI.listJobsWithCookie(cookie, workspaceId, { pageSize: 50 }),
-      )
-      for (const job of jobs) {
-        if (job.logic_compute_group_id !== computeGroupId) continue
-        const specId = InspireAPI.extractSpecId(job)
-        if (specId) {
-          const gpuInfo = InspireAPI.extractGpuInfo(job)
-          setCachedSpecId(workspaceId, computeGroupId, specId, {
-            gpuCount: gpuInfo.gpu_count,
-            gpuType: "",
-          })
-          return specId
-        }
-      }
-    } catch (err) {
-      console.warn("[inspire.cache] failed to resolve spec_id from job list", workspaceId, String(err))
+    const specs = await resolveAvailableSpecs(workspaceId, computeGroupId)
+    if (specs.length > 0) {
+      const spec = specs[0]
+      setCachedSpecId(workspaceId, computeGroupId, spec.quota_id, {
+        gpuCount: spec.gpu_count,
+        gpuType: spec.gpu_info?.gpu_product_simple ?? "",
+      })
+      return spec.quota_id
     }
 
     return undefined

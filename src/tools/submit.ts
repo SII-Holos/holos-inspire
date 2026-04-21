@@ -216,15 +216,37 @@ export const inspireSubmit = tool({
     }
 
     if (!specId) {
+      const availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id)
+      if (availableSpecs.length > 0) {
+        const lines = [
+          "未指定 spec_id。当前计算组可用的资源规格如下：",
+          "",
+          "| GPU | CPU | 内存(GB) | 价格(点券/h) | spec_id |",
+          "|-----|-----|----------|-------------|---------|",
+        ]
+        for (const s of availableSpecs) {
+          lines.push(`| ${s.gpu_count} | ${s.cpu_count} | ${s.memory_size_gib} | ${s.total_price_per_hour} | ${s.quota_id} |`)
+        }
+        lines.push(
+          "",
+          "请根据任务需求选择合适的规格：",
+          "- 多机训练建议选整节点（如 8 GPU）避免资源碎片化",
+          "- 单卡调试可选最小规格",
+          "- 选定后用 spec 参数传入，或用 inspire_config 设为默认值",
+        )
+        return {
+          title: "请选择资源规格",
+          output: lines.join("\n"),
+          metadata: { error: "spec_id_required", available_specs: availableSpecs } as Record<string, any>,
+        }
+      }
       return {
         title: "缺少规格 ID",
         output: [
-          "未指定 spec_id 且无法自动解析。",
+          "未指定 spec_id 且无法查询可用规格。",
           "",
-          "提交任务必须提供 spec_id（即 quota_id）。获取方式：",
-          "1. 调用 inspire_job_detail 查看已有任务的「规格 ID (quota_id)」",
-          '2. 用 inspire_config(action="set", key="defaultSpecId", value="...") 设置默认值',
-          "3. 在 inspire_submit 的 spec 参数中直接指定",
+          "获取方式：在平台 UI 新建任务页面选择计算类型组后可看到规格 ID。",
+          '设置默认值: inspire_config(action="set", key="defaultSpecId", value="...")',
         ].join("\n"),
         metadata: { error: "missing_spec_id" } as Record<string, any>,
       }
@@ -250,21 +272,30 @@ export const inspireSubmit = tool({
       )
     } catch (err: any) {
       const msg = String(err?.message ?? err)
-      if (msg.includes("spec_id") || msg.includes("SpecId") || msg.includes("spec not found")) {
+      if (msg.includes("spec_id") || msg.includes("SpecId") || msg.includes("spec not found") || msg.includes("predef_train_spec")) {
+        const availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id)
+        const lines = [
+          `spec_id "${specId}" 无效（计算组: ${cg.name}）。`,
+          "",
+        ]
+        if (availableSpecs.length > 0) {
+          lines.push(
+            "当前计算组可用规格：",
+            "",
+            "| GPU | CPU | 内存(GB) | 价格(点券/h) | spec_id |",
+            "|-----|-----|----------|-------------|---------|",
+          )
+          for (const s of availableSpecs) {
+            lines.push(`| ${s.gpu_count} | ${s.cpu_count} | ${s.memory_size_gib} | ${s.total_price_per_hour} | ${s.quota_id} |`)
+          }
+          lines.push("", '请选择正确的 spec_id 重新提交，或用 inspire_config(action="set", key="defaultSpecId", value="...") 更新默认值。')
+        } else {
+          lines.push("无法查询可用规格列表。请在平台 UI 新建任务时查看规格 ID。")
+        }
         return {
           title: "提交失败: 规格 ID 无效",
-          output: [
-            `spec_id "${specId}" 无效，可能不属于当前计算组 "${cg.name}" 或已过期。`,
-            "",
-            "每个计算组有自己的 spec_id（即 quota_id），不能跨计算组使用，平台更新规格配置后旧 ID 会失效。",
-            "",
-            "获取正确的 spec_id:",
-            "  1. 在平台 UI 上对同一计算组创建一个 demo 任务（命令填 echo test）",
-            "  2. 用 inspire_job_detail 查看该任务的 quota_id",
-            "  3. 用 inspire_config 设置 defaultSpecId 为该值",
-            "  4. 清除旧缓存: inspire_config(action=\"set\", key=\"defaultSpecId\", value=\"\")",
-          ].join("\n"),
-          metadata: { error: "invalid_spec_id", spec_id: specId, compute_group: cg.name } as Record<string, any>,
+          output: lines.join("\n"),
+          metadata: { error: "invalid_spec_id", spec_id: specId, compute_group: cg.name, available_specs: availableSpecs } as Record<string, any>,
         }
       }
       return {

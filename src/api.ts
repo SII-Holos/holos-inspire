@@ -87,10 +87,36 @@ export namespace InspireAPI {
     return data.node_dimensions ?? []
   }
 
-  export async function listSpecs(cookie: string, computeGroupId: string): Promise<any[]> {
+  export interface ResourceSpec {
+    quota_id: string
+    gpu_count: number
+    cpu_count: number
+    memory_size_gib: number
+    total_price_per_hour: number
+    gpu_info?: { gpu_type_display?: string; gpu_product_simple?: string; gpu_memory_size_gb?: number }
+  }
+
+  export async function listResourceSpecs(
+    cookie: string,
+    workspaceId: string,
+    computeGroupId: string,
+    scheduleType: string = "SCHEDULE_CONFIG_TYPE_TRAIN",
+  ): Promise<ResourceSpec[]> {
     try {
-      const data = await postInternal("/api/v1/specs/list", { logic_compute_group_id: computeGroupId }, cookie)
-      return data.specs ?? []
+      const data = await postInternal(
+        "/api/v1/resource_prices/logic_compute_groups/",
+        { logic_compute_group_id: computeGroupId, workspace_id: workspaceId, schedule_config_type: scheduleType },
+        cookie,
+        workspaceId,
+      )
+      return (data.lcg_resource_spec_prices ?? []).map((s: any) => ({
+        quota_id: s.quota_id,
+        gpu_count: s.gpu_count ?? 0,
+        cpu_count: s.cpu_count ?? 0,
+        memory_size_gib: s.memory_size_gib ?? 0,
+        total_price_per_hour: s.total_price_per_hour ?? 0,
+        gpu_info: s.gpu_info,
+      }))
     } catch {
       return []
     }
