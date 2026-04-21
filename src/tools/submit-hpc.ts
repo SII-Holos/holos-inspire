@@ -9,15 +9,22 @@ import { specNotFoundError, specInvalidError, requireAuth } from "../shared"
 
 const DESCRIPTION = `Submit an HPC/CPU task on the SII 启智平台 (Slurm scheduling). Use for data preprocessing, evaluation, CPU-intensive computation, or auxiliary tasks.
 
-HPC spaces (高性能计算) have NO internet. All dependencies must be pre-installed in the image.
-HPC tasks must use Slurm-compatible images (images with 'slurm' in the name).
-Non-interactive shell: manually source conda in the entrypoint if needed.
+IMPORTANT constraints:
+- HPC spaces (高性能计算) have NO internet. All dependencies must be pre-installed in the image.
+- HPC tasks must use Slurm-compatible images (images with 'slurm' in the name).
+- Non-interactive shell: ~/.bashrc is NOT loaded. Manually source conda in the entrypoint if needed.
+- Images must use the platform display domain (docker.sii.shaipower.online), not the push domain.
+- Images must be registered on the platform after push (镜像管理 → 新建镜像).
+- Priority ≥4 won't be preempted; Priority 1-3 can be killed by higher-priority tasks.
+- Low-priority CPU tasks (Priority 1-3) are free and not limited by project budget.
 
 Typical use cases:
 - Data preprocessing before GPU training
 - Reading experiment results from project directories
 - File operations across project directories
-- Running evaluation scripts that don't need GPU`
+- Running evaluation scripts that don't need GPU
+
+Call inspire_status first to discover resources. Use inspire_config to set defaults for repeated use.`
 
 export const inspireSubmitHpc = tool({
   description: DESCRIPTION,
@@ -28,15 +35,15 @@ export const inspireSubmitHpc = tool({
       .string()
       .optional()
       .describe("Workspace name or ID (e.g. '高性能计算'). Uses sii.defaultWorkspace if omitted"),
-    compute_group: z.string().optional().describe("HPC compute group name or ID. Auto-detected if omitted"),
+    compute_group: z.string().optional().describe("HPC compute group name or ID. Use inspire_status to see available groups"),
     project: z.string().optional().describe("Project name or ID. Uses default or auto-selects if omitted"),
-    image: z.string().optional().describe("Container image. Uses config default if omitted"),
+    image: z.string().optional().describe("Slurm-compatible container image (use platform display domain docker.sii.shaipower.online). Uses config default if omitted"),
     image_type: z
       .enum(["SOURCE_PUBLIC", "SOURCE_PRIVATE", "SOURCE_OFFICIAL"])
       .optional()
       .describe("Image source type (default: SOURCE_PRIVATE)"),
     instances: z.number().optional().describe("Number of nodes (default 1)"),
-    spec: z.string().optional().describe("Spec/quota ID. Call inspire_status to see available specs"),
+    spec: z.string().optional().describe("Spec/quota ID for HPC (SCHEDULE_CONFIG_TYPE_HPC). Query available specs via inspire_status"),
     priority: z.number().optional().describe("Task priority. Uses sii.defaultPriority or project max if omitted"),
     number_of_tasks: z.number().optional().describe("Number of Slurm sub-tasks (default 1)"),
     cpus_per_task: z.number().optional().describe("CPU cores per Slurm task (default 1)"),

@@ -6,20 +6,21 @@ import { InspireTypes } from "../types"
 
 const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry.
 
-Pushes to ${InspireTypes.HARBOR_REGISTRY} which serves all spaces except SJ资源空间.
-SJ资源空间 uses a separate registry: docker-t.sii.edu.cn.
+Two registries with separate credentials:
+- 七宝 (default, registry="qb"): push to ${InspireTypes.HARBOR_REGISTRY}, serves all spaces except SJ资源空间
+- 松江 (registry="sj"): push to docker-t.sii.edu.cn, serves SJ资源空间 only
 
 Prerequisites:
 - Docker must be installed and running locally
 - Add insecure registry to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
-- Harbor credentials configured (synergy inspire harbor-login). Password is separate from platform password — find it under 镜像管理 → 本地推送
+- Harbor credentials configured (synergy inspire harbor-login). 七宝 and 松江 have different passwords — find them under 镜像管理 → 本地推送
 - Must be on VPN or campus network
 
 After pushing, you MUST register the image on the platform:
 Go to 镜像管理 → 新建镜像, fill in 镜像名称 and 版本号, then save.
 Without registration, the image cannot be used for task submission or notebook creation.
 
-Note: the push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain the platform assigns after registration (docker.sii.shaipower.online). Always use the platform-assigned address when submitting tasks.`
+The push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain (docker.sii.shaipower.online). Always use the platform-assigned display address when submitting tasks.`
 
 export const inspireImagePush = tool({
   description: DESCRIPTION,
@@ -35,7 +36,7 @@ export const inspireImagePush = tool({
     registry: z
       .enum(["qb", "sj"])
       .optional()
-      .describe("Target registry: 'qb' (七宝, default, most spaces) or 'sj' (松江, SJ资源空间 only)"),
+      .describe("Target registry: 'qb' (七宝, default, most spaces) or 'sj' (松江, SJ资源空间 only). Each has separate credentials"),
     description: z
       .string()
       .optional()

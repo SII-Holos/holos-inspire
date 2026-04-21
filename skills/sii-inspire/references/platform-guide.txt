@@ -2,75 +2,121 @@
 
 ## Workspace Types & Network
 
-| Space | Internet | GPU | Use Case |
-|-------|----------|-----|----------|
-| 可上网GPU资源 | ✅ whitelist | 4090 (48GB) | Download data, set up environments, light training |
-| 分布式训练空间 | ❌ | H100 (80GB), H200 (141GB) | Large-scale training. Images and data must be prepared in advance |
-| CPU资源空间 | ✅ whitelist | None | Data transfer, preprocessing, reading results |
-| 高性能计算 | ❌ | None (Slurm) | CPU-intensive HPC jobs. Must use slurm-tagged images |
-| 国产卡资源空间 | ✅ whitelist | Ascend 910B (64GB) | Huawei Ascend hardware |
-| 专属资源开发空间 | ✅ | 4090 (48GB) | Dedicated resources, supports SSH (beta) |
-| SJ资源空间 | ✅ | Ascend 910B (64GB) | 松江 campus, Ascend hardware |
+| Space | Internet | GPU | Registry | Use Case |
+|-------|----------|-----|----------|----------|
+| 可上网GPU资源 | ✅ whitelist | 4090 (48GB) | 七宝 | Download data, set up environments, light training |
+| 分布式训练空间 | ❌ | H100 (80GB), H200 (141GB) | 七宝 | Large-scale distributed training |
+| CPU资源空间 | ✅ whitelist | None | 七宝 | Data transfer, preprocessing, reading results |
+| 高性能计算 | ❌ | None (Slurm) | 七宝 | CPU-intensive HPC jobs. Must use slurm-tagged images |
+| 国产卡资源空间 | ✅ whitelist | Ascend 910B (64GB) | 七宝 | Huawei Ascend hardware |
+| PPU资源空间 | ✅ whitelist | PPU | 七宝 | PPU hardware |
+| 专属资源开发空间 | ✅ | 4090 (48GB) | 七宝 | Dedicated resources, supports SSH (beta) |
+| SJ资源空间 | ✅ | Ascend 910B (64GB) | 松江 | 松江 campus, Ascend hardware, separate registry |
+| 整节点任务空间 | ❌ | — | 七宝 | Whole-node tasks |
+| 公共项目空间 | — | — | 七宝 | Public fallback project, lowest priority |
 
 Bandwidth: 10Gbps shared outbound for all internet-enabled spaces.
 
-## Storage Architecture
+## Image Registry Model
 
-```
-/inspire/hdd/project/{project_en_name}/        ← HDD, shared across ALL spaces in same project
-/inspire/ssd/{workspace_id}/{project_en_name}/  ← SSD, shared across spaces
-/inspire/hdd/global_user/{username}/            ← Personal global directory
-/inspire/hdd/project/{project_en_name}/public   ← Project-level shared directory for team members
-```
+Two independent registry systems (images NOT shared between them):
 
-- Same project = same storage, regardless of which space you're in
-- Different projects cannot see each other's storage
-- Deletion is IRREVERSIBLE (GPFS has no recycle bin)
-- Check quota: `df -h /inspire/hdd/project/{name}/`
-- Expand quota: project owner requests via Feishu approval or contacts advisor
+**Main registry (all spaces except SJ):**
+- Push domain: `docker-qb.sii.edu.cn`
+- Display domain: `docker.sii.shaipower.online` (assigned by platform after registration)
+- Submit tasks using display domain, NOT push domain
 
-## Priority & Scheduling
+**SJ registry (SJ资源空间 only):**
+- Push domain: `docker-t.sii.edu.cn`
+- Display domain: `docker-t.sii.shaipower.online`
 
-- Each project has a max priority (visible in `inspire_status` as `priority_name`)
-- Priority 1-3: can be preempted (killed) by higher-priority tasks
-- Priority ≥4: will NOT be preempted
-- Same priority: tasks using fewer GPUs are scheduled first
-- Multi-node tasks: all nodes must be simultaneously available
-- GPU utilization too low → auto-reclaimed (policy varies by space)
+**Push workflow:**
+1. `docker login docker-qb.sii.edu.cn` (credentials from 镜像管理 → 本地推送)
+2. `docker tag <local> docker-qb.sii.edu.cn/inspire-studio/<镜像名称>:<版本号>`
+3. `docker push docker-qb.sii.edu.cn/inspire-studio/<镜像名称>:<版本号>`
+4. **MUST register** on platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save
+5. Use display domain address in task submission: `docker.sii.shaipower.online/inspire-studio/<镜像名称>:<版本号>`
 
-## Budget (点券)
+Without registration, the image exists in Harbor but CANNOT be used for tasks, notebooks, or inference services.
 
-- 导师项目/标杆项目: refreshed quarterly (Q1=Jan-Mar, Q2=Apr-Jun, etc.)
-- 公共科研项目: 672 points per user per week (Mondays ~10:00)
-- Budget ≤0: may block task creation. Workaround: use priority 1-3 for CPU tasks (exempt from budget)
-- Max GPU quota per project: 32 cards (导师项目, may be adjusted)
+**Harbor credentials:**
+- 七宝 and 松江 have different passwords (same username pattern: robot$inspire-studio+user-xxx)
+- Credentials shown on first visit to 镜像管理 → 本地推送 page. Save them carefully.
+- Requires VPN or campus network to push
 
-## Image Management
-
-Two registries:
-- Main: push to `docker-qb.sii.edu.cn`, platform displays as `docker.sii.shaipower.online` (all spaces except SJ)
-- SJ资源空间: push to `docker-t.sii.edu.cn`, platform displays as `docker-t.sii.shaipower.online`
-
-Push workflow:
-1. `docker login docker-qb.sii.edu.cn` (credentials from platform's Image Management → 本地推送)
-2. `docker tag <local> docker-qb.sii.edu.cn/inspire-studio/<name>:<tag>`
-3. `docker push docker-qb.sii.edu.cn/inspire-studio/<name>:<tag>`
-4. MUST register on platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save
-   Without registration, the image cannot be used for tasks or notebooks.
-5. Use the platform-assigned address (docker.sii.shaipower.online/...) in task submission, not the push address.
-
-Image saves:
+**Image saves (from notebooks):**
 - Only saves container filesystem changes (`/usr/local`, `/root`, etc.)
 - Does NOT save mounted storage (`/inspire/hdd/...`)
 - Clean caches before saving: `apt clean && pip cache purge && rm -rf ~/.cache`
 - Images >100GB may fail to save
 
-## Package Sources (Nexus mirrors, for offline spaces)
+## Resource Specs (spec_id / quota_id)
+
+Each task type has its own set of resource specs, obtained via the resource_prices API:
+
+| Task Type | schedule_config_type | Example Specs |
+|-----------|---------------------|---------------|
+| GPU Training | SCHEDULE_CONFIG_TYPE_TRAIN | 1/2/4/8 GPU with matching CPU/memory |
+| HPC/Slurm | SCHEDULE_CONFIG_TYPE_HPC | CPU-only configs (16/32/55 cores) |
+| Notebook (DSW) | SCHEDULE_CONFIG_TYPE_DSW | 1/2/4/8 GPU or CPU-only |
+
+- spec_id = quota_id (same value, different name in different contexts)
+- Training and notebook spec_ids are NOT interchangeable
+- Specs can expire when platform updates configurations
+- Use `inspire_status` to see current available specs per compute group
+- Omit `spec` in submit tools to see a table of available specs
+
+## Storage Architecture
+
+```
+/inspire/hdd/project/{project_en_name}/        ← HDD, shared across ALL spaces in same project
+/inspire/ssd/{workspace_id}/{project_en_name}/  ← SSD, higher performance
+/inspire/hdd/global_user/{username}/            ← Personal global directory (cross-project)
+/inspire/hdd/project/{project_en_name}/public   ← Team-shared directory within project
+```
+
+- Same project = same storage, regardless of which space
+- Different projects CANNOT see each other's storage
+- Deletion is **IRREVERSIBLE** (GPFS has no recycle bin or snapshots)
+- Check quota: `df -h /inspire/hdd/project/{name}/`
+- Expand project quota: contact advisor or apply via Feishu approval
+- Expand personal quota: Feishu → 审批 → 算力平台存储申请
+
+## Priority & Scheduling
+
+- Each project has a max priority (shown in `inspire_status`)
+- Priority 1-3: **preemptable** — can be killed when resources are tight
+- Priority ≥4: **safe** — will NOT be preempted
+- Same priority: smaller tasks (fewer GPUs) are scheduled first
+- Multi-node tasks: all requested nodes must be simultaneously available
+- Low-utilization GPU instances may be auto-reclaimed (policy varies by space)
+
+## Budget (点券)
+
+| Project Type | Refresh Period | Refresh Time | Notes |
+|-------------|---------------|-------------|-------|
+| 导师/标杆/火炬/科学智能 | Quarterly | Start of Jan/Apr/Jul/Oct | Previous balance cleared |
+| 公共科研项目 | Weekly | Monday ~10:00 | 672 points per user |
+
+- Budget ≤0 may block task creation
+- Workaround: low-priority CPU tasks (priority 1-3) are exempt from budget
+- Max GPU quota per 导师项目: 32 cards (adjustable by request)
+
+## VPN & Network
+
+- VPN (aTrust): single device only, no concurrent logins
+- Campus network: no VPN needed, direct access
+- DNS for internal domains: set to `10.11.26.11`
+- HuggingFace mirror: `export HF_ENDPOINT=https://hf-mirror.com` (online spaces only)
+
+## Package Sources (Nexus mirrors, for offline/all spaces)
 
 | Package Manager | Mirror URL |
 |----------------|-----------|
 | pip | `http://nexus.sii.shaipower.online/repository/pypi_proxy/simple/` |
 | conda | `http://nexus.sii.shaipower.online/repository/anaconda/main` |
 | npm | `http://nexus.sii.shaipower.online/repository/npm_proxy/` |
-| apt (Ubuntu focal) | `http://nexus.sii.shaipower.online/repository/ubuntu/` |
-| HuggingFace | `export HF_ENDPOINT=https://hf-mirror.com` (online spaces only) |
+| apt (focal) | `http://nexus.sii.shaipower.online/repository/ubuntu/` |
+| go | `http://nexus.sii.shaipower.online/repository/goproxy/` |
+| cargo/rustup | `http://nexus.sii.shaipower.online/repository/rustup/` |
+| ruby | `http://nexus.sii.shaipower.online/repository/ruby/` |

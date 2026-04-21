@@ -9,7 +9,7 @@ import { requireWorkspace, requireAuth } from "../shared"
 const DESCRIPTION = `Search and browse Docker images available on the SII 启智平台.
 
 Two sources:
-- source="platform" (default): query images registered on the platform (镜像管理). These are the images accepted by inspire_submit. Shows image name, tag, type (官方/个人可见/公开可见), and full address.
+- source="platform" (default): query images registered on the platform (镜像管理). These are the images actually usable for task submission. Shows image name, tag, type (官方/个人可见/公开可见), and full display address.
 - source="harbor": query the raw Harbor registry at ${InspireTypes.HARBOR_REGISTRY}. Shows all pushed images including unregistered ones.
 
 Usage:
@@ -17,8 +17,11 @@ Usage:
 - search: find images by keyword
 - repo: (harbor only) view all versions (tags) of a specific image
 
-The Harbor registry serves all spaces except SJ资源空间 (which uses docker-t.sii.edu.cn).
-Note: push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain (docker.sii.shaipower.online). Use inspire_image_push to push new images.`
+Two registries with separate credentials:
+- 七宝 (main): push to ${InspireTypes.HARBOR_REGISTRY}, display as docker.sii.shaipower.online (all spaces except SJ)
+- 松江 (SJ): push to docker-t.sii.edu.cn, display as docker-t.sii.shaipower.online (SJ资源空间 only)
+
+Submit tasks using the display domain, not the push domain. Images must be registered on the platform after push (镜像管理 → 新建镜像).`
 
 export const inspireImages = tool({
   description: DESCRIPTION,

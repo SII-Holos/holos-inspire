@@ -43,10 +43,10 @@ export const inspireSubmit = tool({
     compute_group: z
       .string()
       .optional()
-      .describe("Compute group name or ID. Auto-selects if omitted"),
+      .describe("Compute group name or ID. Use inspire_status to see available groups"),
     project: z.string().optional().describe("Project name or ID. Uses sii.defaultProject or auto-selects if omitted"),
-    spec: z.string().optional().describe("Spec/quota ID. Call inspire_status to see available specs"),
-    image: z.string().optional().describe("Docker image address. Uses sii.defaultImage if omitted"),
+    spec: z.string().optional().describe("Spec/quota ID for training (SCHEDULE_CONFIG_TYPE_TRAIN). Query available specs via inspire_status"),
+    image: z.string().optional().describe("Docker image (use platform display domain docker.sii.shaipower.online, or docker-t.sii.shaipower.online for SJ). Uses sii.defaultImage if omitted"),
     image_type: z
       .enum(["SOURCE_PUBLIC", "SOURCE_PRIVATE", "SOURCE_OFFICIAL"])
       .optional()

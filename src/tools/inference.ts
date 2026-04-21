@@ -31,7 +31,7 @@ export const inspireInference = tool({
     action: z.enum(["create", "detail", "stop"]).describe("Action to perform"),
     name: z.string().optional().describe("Inference serving name (required for create)"),
     command: z.string().optional().describe("Startup command (required for create)"),
-    image: z.string().optional().describe("Container image address"),
+    image: z.string().optional().describe("Container image (use platform display domain docker.sii.shaipower.online)"),
     image_type: z
       .enum(["SOURCE_PUBLIC", "SOURCE_PRIVATE", "SOURCE_OFFICIAL"])
       .optional()
@@ -44,9 +44,9 @@ export const inspireInference = tool({
     custom_domain: z.string().optional().describe("Custom domain for the service"),
     serving_id: z.string().optional().describe("Inference serving ID (sv-xxx, required for detail/stop)"),
     workspace: z.string().optional().describe("Workspace name or ID. Uses sii.defaultWorkspace if omitted"),
-    compute_group: z.string().optional().describe("Compute group name or ID. Auto-selects if omitted"),
+    compute_group: z.string().optional().describe("Compute group name or ID. Use inspire_status to see available groups"),
     project: z.string().optional().describe("Project name or ID. Uses default or auto-selects if omitted"),
-    spec: z.string().optional().describe("Spec/quota ID. Call inspire_status to see available specs"),
+    spec: z.string().optional().describe("Spec/quota ID for training. Query available specs via inspire_status"),
     priority: z.number().optional().describe("Task priority. Uses sii.defaultPriority or project max if omitted"),
   },
   async execute(params, ctx) {

@@ -98,12 +98,21 @@ export UCC_TLS="^sharp"
 
 ## Fault Tolerance
 
-Enable auto fault tolerance in `inspire_submit` by adding to the job config:
+Enable auto fault tolerance in `inspire_submit`:
 ```
-auto_fault_tolerance: true
+inspire_submit(..., auto_fault_tolerance=true)
 ```
 
 This allows the platform to automatically restart the task on a different node if the current node fails.
+
+## Resource Spec Selection for Training
+
+Use `inspire_status` to see available specs per compute group. The `spec` parameter in `inspire_submit` corresponds to `SCHEDULE_CONFIG_TYPE_TRAIN` specs.
+
+When choosing a spec for distributed training:
+- Pick whole-node specs (e.g., 8 GPU) to avoid resource fragmentation
+- Single-GPU specs are fine for debugging but may block others from assembling multi-node jobs
+- Each compute group has its own spec list — verify with `inspire_status` before submitting
 
 ## HPC / Slurm Jobs
 

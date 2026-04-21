@@ -10,16 +10,17 @@ import { listAvailableSpecs, requireAuth } from "../shared"
 const DESCRIPTION = `Query SII 启智平台 project, workspace, GPU resource, and constraint information. Returns the full decision context in one call: which projects you belong to, which workspaces are available, GPU availability per compute group, available specs, max priority, remaining budget, and storage paths.
 
 启智平台 has multiple workspace types with different network permissions:
-- **可上网GPU资源**: has internet (whitelist), for downloading data, setting up environments, light training (usually 4090/T4)
-- **分布式训练空间**: NO internet, for large-scale training (H100/H200). Images and data must be prepared in advance
-- **CPU资源空间**: has internet, for data transfer and preprocessing
-- **高性能计算**: NO internet, Slurm-scheduled CPU tasks
-- **国产卡资源空间**: has internet, for Ascend 910B hardware
+- **可上网GPU资源, CPU资源空间, 国产卡, PPU, 专属资源开发空间**: has internet (whitelist)
+- **分布式训练空间, 高性能计算, 整节点任务空间**: NO internet — all deps must be in the image
+- **SJ资源空间**: has internet, 松江 campus, uses separate registry (docker-t.sii.shaipower.online)
+- Storage is shared across spaces within the same project
 
 Budget and quota notes:
-- Mentor projects: budget refreshes quarterly (start of Jan/Apr/Jul/Oct), GPU quota capped at 32 cards
-- Public projects: budget refreshes weekly (Monday 10:00), unlimited duration but lowest priority
+- 导师项目: budget refreshes quarterly (start of Jan/Apr/Jul/Oct), GPU quota capped at 32 cards
+- 公共科研项目: budget refreshes weekly (Monday 10:00), unlimited duration but lowest priority
 - Low-priority CPU tasks (Priority 1-3) are free and not limited by project budget
+
+spec_id (= quota_id) differs by schedule type (training vs HPC vs notebook). Don't assume — always show the table and let the agent choose.
 
 Call this tool first when starting work on the platform. The returned workspace IDs, compute group IDs, spec IDs, and storage paths are needed for inspire_submit and other tools.`
 

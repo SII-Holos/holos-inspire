@@ -19,6 +19,8 @@ Supports five actions:
 
 Notebooks are persistent resources — they remain until explicitly stopped. Stop notebooks when not in use to avoid unnecessary costs. GPU utilization on running notebooks is monitored; instances with persistently low GPU usage may be auto-reclaimed by the platform.
 
+Notebook spec_ids use SCHEDULE_CONFIG_TYPE_DSW (not the same as training spec_ids). Query available specs via inspire_status.
+
 Call inspire_status first to discover resources. Use inspire_config to set defaults for repeated use.`
 
 export const inspireNotebook = tool({
@@ -31,9 +33,9 @@ export const inspireNotebook = tool({
     limit: z.number().optional().describe("Max results per page (default 20, max 100)"),
     notebook_id: z.string().optional().describe("Notebook ID (required for detail/start/stop)"),
     name: z.string().optional().describe("Notebook name (required for create)"),
-    image: z.string().optional().describe("Container image address"),
-    compute_group: z.string().optional().describe("Compute group name or ID"),
-    spec: z.string().optional().describe("Spec/quota ID"),
+    image: z.string().optional().describe("Container image (use platform display domain docker.sii.shaipower.online)"),
+    compute_group: z.string().optional().describe("Compute group name or ID. Use inspire_status to see available groups"),
+    spec: z.string().optional().describe("Spec/quota ID for notebooks (SCHEDULE_CONFIG_TYPE_DSW). Query available specs via inspire_status"),
     priority: z.number().optional().describe("Task priority"),
     command: z.string().optional().describe("Startup command"),
     description: z.string().optional().describe("Notebook description"),

@@ -4,114 +4,144 @@ Use this skill when the user wants to run experiments, manage Docker images, or 
 
 ## First-Time Setup
 
-If inspire_config shows no defaults configured yet:
+If inspire_config shows no defaults configured:
 
-1. Run `inspire_status` to discover projects, workspaces, and available GPUs
-2. Set defaults for the user's primary project:
+1. Run `inspire_status` to discover projects, workspaces, compute groups, and available resource specs
+2. Set defaults:
    ```
    inspire_config(action="set", key="defaultProject", value="项目名")
    inspire_config(action="set", key="defaultWorkspace", value="分布式训练空间")
-   inspire_config(action="set", key="defaultComputeGroup", value="cuda12.8版本H100")
-   inspire_config(action="set", key="defaultImage", value="docker-qb.sii.edu.cn/inspire-studio/xxx:tag")
+   inspire_config(action="set", key="defaultImage", value="docker.sii.shaipower.online/inspire-studio/xxx:tag")
    inspire_config(action="set", key="defaultPriority", value="9")
    inspire_config(action="set", key="defaultShm", value="1200")
    inspire_config(action="set", key="commandPrefix", value="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && cd /inspire/hdd/project/{en_name}/code")
    ```
-3. After setup, `inspire_submit` only needs `name` and `command`
+3. After setup, `inspire_submit` only needs `name`, `command`, `compute_group`, and `spec`
+
+Note: `spec` (spec_id) and `compute_group` are NOT stored as defaults — they vary by workspace and task type. Use `inspire_status` to see available specs, then pass them directly.
 
 ## Core Workflows
 
 ### Submit a GPU training job
 
 ```
-inspire_status(project="...", workspace="分布式训练空间")  → check available GPUs
-inspire_submit(name="exp-001", command="python train.py --config configs/baseline.yaml")
-inspire_jobs(status="running")                            → monitor
-inspire_job_detail(job_id="...")                          → check details if failed
+inspire_status()                                              → discover workspaces, compute groups, specs
+inspire_submit(name="exp-001", command="python train.py",
+  compute_group="cuda12.8版本H100", spec="<quota_id>")        → submit (spec from status output)
+inspire_jobs(status="running")                                → monitor
+inspire_job_detail(job_id="job-xxx")                          → check details if failed
+inspire_logs(job_id="job-xxx", lines=50)                      → view logs
+inspire_metrics(job_id="job-xxx", time_range="30m")           → check GPU utilization
 ```
+
+If you omit `spec`, the tool shows a table of available specs — pick one based on the task's resource needs.
 
 ### Submit an HPC (Slurm) job
 
-For CPU-intensive tasks like data preprocessing, evaluation, or file operations:
+For CPU-intensive tasks. HPC space has no internet — all deps must be in the image.
 
 ```
-inspire_submit_hpc(name="preprocess-data", entrypoint="python preprocess.py",
-  workspace="高性能计算", number_of_tasks=2, cpus_per_task=4, memory_per_cpu="8G")
-inspire_job_detail(job_id="hpc-job-xxx")                  → HPC jobs use hpc-job- prefix
+inspire_submit_hpc(name="preprocess", entrypoint="python preprocess.py",
+  workspace="高性能计算", compute_group="高性能计算", spec="<quota_id>",
+  image="docker.sii.shaipower.online/inspire-studio/slurm-xxx:tag",
+  number_of_tasks=2, cpus_per_task=4, memory_per_cpu="8G")
 ```
 
 ### Deploy an inference service
 
-Deploy a trained model as a serving endpoint:
-
 ```
+inspire_models(action="list")                                  → find model_id
 inspire_inference(action="create", name="llama3-serving",
-  model_id="model-xxx", model_version=1, command="python -m vllm.entrypoint.openai.api_server",
-  image="docker-qb.sii.edu.cn/inspire-studio/vllm:latest", port=2400, replicas=1)
-inspire_inference(action="detail", serving_id="sv-xxx")   → inference servings use sv- prefix
+  model_id="xxx", model_version=1, spec="<quota_id>",
+  command="python -m vllm.entrypoints.openai.api_server",
+  image="docker.sii.shaipower.online/inspire-studio/vllm:tag",
+  port=2400, replicas=1)
+inspire_inference(action="detail", serving_id="sv-xxx")
 inspire_inference(action="stop", serving_id="sv-xxx")
 ```
 
-### Prepare a Docker image
+### Create a notebook (interactive development)
 
 ```
-inspire_images(search="torch")                            → find existing images
-inspire_images(repo="dhyu-wan-torch29")                   → check versions
-inspire_image_push(image="my-train:v1", description="PyTorch 2.9 + CUDA 12.8")  → push new image
+inspire_notebook(action="create", name="dev-env",
+  compute_group="4090-cuda12.8", spec="<dsw_quota_id>",
+  image="docker.sii.shaipower.online/inspire-studio/xxx:tag")
 ```
+
+Note: notebook specs differ from training specs. Omit `spec` to see available notebook specs.
+
+### Prepare and push a Docker image
+
+```
+inspire_images(search="torch")                                → find existing registered images
+inspire_images(source="harbor", search="torch")               → search raw Harbor registry
+inspire_image_push(image="my-train:v1", name="my-train", tag="v1")  → push to Harbor
+```
+
+After push, you MUST register the image on the platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save. Without registration, the image cannot be used for tasks or notebooks.
 
 ### Download data for offline training
 
-Offline spaces (分布式训练空间, 高性能计算) have NO internet. To use HuggingFace models or external data:
+Offline spaces (分布式训练空间, 高性能计算) have NO internet. To prepare data:
 
-1. Submit a CPU job in an online space to download:
+1. Submit a download job in an online space (same project → shared storage):
    ```
    inspire_submit(name="download-model", workspace="CPU资源空间",
-     command="export HF_ENDPOINT=https://hf-mirror.com && huggingface-cli download meta-llama/Llama-3-8B --local-dir /inspire/hdd/project/{en_name}/models/llama3-8b")
+     command="export HF_ENDPOINT=https://hf-mirror.com && huggingface-cli download meta-llama/Llama-3-8B --local-dir /inspire/hdd/project/{en_name}/models/llama3-8b",
+     compute_group="CPU资源-2", spec="<cpu_spec_id>", priority=2)
    ```
-2. Wait for download to complete (same project directory is shared across all spaces)
-3. Submit training job in offline space referencing the downloaded path
+2. Wait for download to complete
+3. Submit training in offline space — the data is accessible at the same path
 
-### Capture training output
+### Capture and read training output
 
-The platform has no log API. Always redirect output to a file for debugging:
-
+Always redirect output to a file:
 ```
 inspire_submit(name="exp-001",
-  command="python train.py --config baseline.yaml 2>&1 | tee /inspire/hdd/project/{en_name}/logs/exp-001.log")
+  command="python train.py 2>&1 | tee /inspire/hdd/project/{en_name}/logs/exp-001.log")
 ```
 
-To read results after completion, submit a lightweight CPU job:
-```
-inspire_submit(name="read-results", workspace="CPU资源空间",
-  command="cat /inspire/hdd/project/{en_name}/logs/exp-001.log && cat /inspire/hdd/project/{en_name}/results/*.json")
-```
+To read results: `inspire_logs(job_id="job-xxx")` or submit a lightweight CPU job to cat the log file.
 
-### Set up monitoring with Agenda
+## Key Platform Rules
 
-After submitting jobs, create an agenda watch to get notified when they finish:
+### Images & Registries
+- **Two registries**: main (docker-qb.sii.edu.cn → docker.sii.shaipower.online) for all spaces except SJ; SJ-only (docker-t.sii.edu.cn → docker-t.sii.shaipower.online)
+- **Push ≠ usable**: after docker push, must register on platform via 镜像管理
+- **Submit uses display domain**: always use docker.sii.shaipower.online/... (not docker-qb.sii.edu.cn/...)
+- **Harbor credentials**: 七宝 and 松江 have different passwords
 
-```
-agenda_create({
-  title: "Monitor: exp-001",
-  prompt: "Check inspire_jobs(status='running'). Report when exp-001 completes or fails.",
-  triggers: [{ type: "watch", watch: { kind: "tool", tool: "inspire_jobs", args: { status: "running" }, interval: "5m", trigger: "change" } }]
-})
-```
+### Resource Specs
+- **spec_id varies by task type**: training, HPC, and notebook each have different spec lists
+- **Query dynamically**: use `inspire_status` or omit `spec` in submit tools to see available specs
+- **Avoid fragmentation**: for large training, pick whole-node specs (e.g., 8 GPU) rather than single-GPU specs
 
-## Key Platform Constraints
+### Compute & Scheduling
+- **Priority ≥4**: won't be preempted. Priority 1-3: can be killed by higher-priority tasks.
+- **Low-priority CPU tasks (1-3)**: exempt from budget — useful when budget is exhausted
+- **Non-interactive shell**: ~/.bashrc NOT loaded. Must `source /opt/conda/etc/profile.d/conda.sh && conda activate myenv` in every command. Use `commandPrefix` to automate this.
+- **Offline spaces**: no pip install, git clone, wget. All dependencies must be in the Docker image.
+- **Distributed training env vars**: platform auto-injects MASTER_ADDR, MASTER_PORT, PET_NNODES, PET_NODE_RANK, PET_NPROC_PER_NODE
 
-- **Offline spaces**: No internet. No pip install, git clone, wget in commands. All dependencies must be in the Docker image. All data must be in the project directory.
-- **Non-interactive shell**: ~/.bashrc is NOT loaded. Must source conda manually. Use `commandPrefix` to automate this.
-- **Priority ≥4**: Won't be preempted. Priority 1-3 can be killed by higher-priority tasks.
-- **Two registries**: 七宝 uses `docker-qb.sii.edu.cn`, 松江 uses `docker.sii.shaipower.online`. They are NOT interchangeable.
-- **Storage is shared**: `/inspire/hdd/project/{en_name}/` is accessible from ALL spaces in the same project.
-- **No log API**: Always use `2>&1 | tee` to capture output to a file in the project directory.
-- **Task types by ID prefix**: `job-xxx` (GPU training), `hpc-job-xxx` (HPC/Slurm), `sv-xxx` (inference serving). The `inspire_stop` and `inspire_job_detail` tools auto-detect the type by prefix.
-- **OpenAPI required**: Task submission and stop operations use the official OpenAPI. HPC submission falls back to cookie API if OpenAPI is unavailable. Inference serving creation requires OpenAPI.
+### Storage
+- `/inspire/hdd/project/{en_name}/` — shared across ALL spaces in same project
+- `/inspire/hdd/global_user/{username}/` — personal global directory
+- Deletion is **irreversible** (GPFS has no recycle bin)
+- Check quota: `df -h /inspire/hdd/project/{name}/`
+
+### Budget
+- 导师项目: refreshed quarterly. Max 32 GPU cards.
+- 公共科研项目: 672 points/user/week (Monday ~10:00)
+
+## Task ID Prefixes
+- `job-xxx` → GPU training task
+- `hpc-job-xxx` → HPC/Slurm task
+- `sv-xxx` → Inference serving
+
+Tools auto-detect the type by prefix.
 
 ## When to Load References
 
-- Platform space types, storage paths, quota rules → load `references/platform-guide.txt`
+- Platform spaces, storage, quota rules → load `references/platform-guide.txt`
 - Task failures, queue issues, common errors → load `references/troubleshooting.txt`
 - Multi-GPU training, NCCL, torchrun setup → load `references/distributed-training.txt`
