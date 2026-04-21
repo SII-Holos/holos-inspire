@@ -13,9 +13,10 @@ Usage:
 - search: find images by keyword (matches repository name, e.g. "torch", "cuda12")
 - repo: view all versions (tags) of a specific image
 
-Images are stored at ${InspireTypes.HARBOR_REGISTRY}/${InspireTypes.HARBOR_PROJECT}/.
-This registry covers 七宝 cluster only. 松江 cluster uses docker.sii.shaipower.online — images are NOT shared between registries.
-Use inspire_image_push to push new images. Use the full image address in inspire_submit's image parameter.`
+This tool queries ${InspireTypes.HARBOR_REGISTRY} (七宝 registry). Two independent registries exist:
+- ${InspireTypes.HARBOR_REGISTRY}: for 可上网GPU资源, CPU资源空间, 国产卡, PPU
+- docker.sii.shaipower.online: for 分布式训练空间, 高性能计算
+Images are NOT shared between registries. Use inspire_image_push to push new images.`
 
 export const inspireImages = tool({
   description: DESCRIPTION,

@@ -4,21 +4,24 @@ import { InspireHarbor } from "../harbor"
 import { InspireAuth } from "../auth"
 import { InspireTypes } from "../types"
 
-const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry (${InspireTypes.HARBOR_REGISTRY}/${InspireTypes.HARBOR_PROJECT}/).
+const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry.
+
+This tool pushes to ${InspireTypes.HARBOR_REGISTRY} (七宝) by default. For 松江 registry (docker.sii.shaipower.online), set the registry parameter.
 
 Prerequisites:
 - Docker must be installed and running locally
-- Add insecure registry to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
-- Harbor credentials configured (synergy inspire harbor-login). Harbor password is separate from platform password — find it on the platform under 镜像管理 → 本地推送
-- Must be on VPN or campus network
+- For 七宝: add to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
+- Harbor credentials configured (synergy inspire harbor-login). Password is separate from platform password — find it under 镜像管理 → 本地推送
+- Must be on VPN or campus network. 松江 registry is only reachable from campus network.
 
-Registry and workspace mapping:
-- ${InspireTypes.HARBOR_REGISTRY} (七宝): used by 可上网GPU资源 and some other workspaces
-- docker.sii.shaipower.online (松江): used by 分布式训练空间. Only reachable from campus network/VPN.
-- Check which registry your target workspace uses via inspire_jobs — look at image domains in existing successful tasks.
-- A workspace may accept images from either registry.
+Two registries (independent, images NOT shared between them):
+- ${InspireTypes.HARBOR_REGISTRY} (七宝): for 可上网GPU资源, CPU资源空间, 国产卡, PPU
+- docker.sii.shaipower.online (松江): for 分布式训练空间, 高性能计算
+- Cross-registry use requires: pull from source → retag → push to target
 
-After pushing, the image may need to be registered on the platform (镜像管理 → 新建镜像) before it can be used. Test by submitting a task — if you get "image not found", register the image first.
+IMPORTANT — after pushing, you MUST register the image on the platform:
+Go to 镜像管理 → 新建镜像, fill in repository name and tag, then save.
+Without registration, the image exists in Harbor but cannot be used for task submission or notebook creation.
 
 Use the returned full image address in inspire_submit's image parameter.`
 
@@ -76,10 +79,10 @@ export const inspireImagePush = tool({
       if (params.description && !descriptionSet) lines.push("⚠ 描述设置失败（权限不足），推送本身已成功")
       lines.push(
         "",
-        "可在 inspire_submit 中使用:",
-        `  inspire_submit(image="${result.fullPath}", ...)`,
-        "",
-        "⚠ 如果是首次推送该仓库名，可能需要在平台「镜像管理」页面手动认领镜像。",
+        "下一步:",
+        "  1. 在平台「镜像管理 → 新建镜像」中注册该镜像（填写仓库名和Tag）",
+        "  2. 注册后即可在 inspire_submit 中使用:",
+        `     inspire_submit(image="${result.fullPath}", ...)`,
       )
 
       return {
