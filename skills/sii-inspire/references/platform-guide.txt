@@ -47,17 +47,17 @@ Bandwidth: 10Gbps shared outbound for all internet-enabled spaces.
 
 ## Image Management
 
-Two independent registries (NOT shared, NOT interchangeable):
-- 七宝: `docker-qb.sii.edu.cn` → used by: 可上网GPU资源, CPU资源空间, 国产卡, PPU
-- 松江: `docker.sii.shaipower.online` → used by: 分布式训练空间, 高性能计算
-- Cross-registry: pull from source → retag → push to target
+Two registries:
+- Main: push to `docker-qb.sii.edu.cn`, platform displays as `docker.sii.shaipower.online` (all spaces except SJ)
+- SJ资源空间: push to `docker-t.sii.edu.cn`, platform displays as `docker-t.sii.shaipower.online`
 
 Push workflow:
-1. `docker login docker-qb.sii.edu.cn` (credentials from platform's Image Management → Local Push page)
+1. `docker login docker-qb.sii.edu.cn` (credentials from platform's Image Management → 本地推送)
 2. `docker tag <local> docker-qb.sii.edu.cn/inspire-studio/<name>:<tag>`
 3. `docker push docker-qb.sii.edu.cn/inspire-studio/<name>:<tag>`
-4. MUST register on platform: 镜像管理 → 新建镜像 → fill name + tag → save
-   Without registration, the image cannot be used for tasks or notebooks even though Harbor has it.
+4. MUST register on platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save
+   Without registration, the image cannot be used for tasks or notebooks.
+5. Use the platform-assigned address (docker.sii.shaipower.online/...) in task submission, not the push address.
 
 Image saves:
 - Only saves container filesystem changes (`/usr/local`, `/root`, etc.)

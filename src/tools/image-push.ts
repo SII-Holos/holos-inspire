@@ -6,24 +6,20 @@ import { InspireTypes } from "../types"
 
 const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry.
 
-This tool pushes to ${InspireTypes.HARBOR_REGISTRY} (七宝) by default. For 松江 registry (docker.sii.shaipower.online), set the registry parameter.
+Pushes to ${InspireTypes.HARBOR_REGISTRY} which serves all spaces except SJ资源空间.
+SJ资源空间 uses a separate registry: docker-t.sii.edu.cn.
 
 Prerequisites:
 - Docker must be installed and running locally
-- For 七宝: add to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
+- Add insecure registry to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
 - Harbor credentials configured (synergy inspire harbor-login). Password is separate from platform password — find it under 镜像管理 → 本地推送
-- Must be on VPN or campus network. 松江 registry is only reachable from campus network.
+- Must be on VPN or campus network
 
-Two registries (independent, images NOT shared between them):
-- ${InspireTypes.HARBOR_REGISTRY} (七宝): for 可上网GPU资源, CPU资源空间, 国产卡, PPU
-- docker.sii.shaipower.online (松江): for 分布式训练空间, 高性能计算
-- Cross-registry use requires: pull from source → retag → push to target
+After pushing, you MUST register the image on the platform:
+Go to 镜像管理 → 新建镜像, fill in 镜像名称 and 版本号, then save.
+Without registration, the image cannot be used for task submission or notebook creation.
 
-IMPORTANT — after pushing, you MUST register the image on the platform:
-Go to 镜像管理 → 新建镜像, fill in repository name and tag, then save.
-Without registration, the image exists in Harbor but cannot be used for task submission or notebook creation.
-
-Use the returned full image address in inspire_submit's image parameter.`
+Note: the push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain the platform assigns after registration (docker.sii.shaipower.online). Always use the platform-assigned address when submitting tasks.`
 
 export const inspireImagePush = tool({
   description: DESCRIPTION,

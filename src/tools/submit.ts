@@ -20,10 +20,9 @@ IMPORTANT constraints:
 - Priority must not exceed the project's max (check via inspire_status). Priority ≥4 won't be preempted; Priority 1-3 can be killed by higher-priority tasks.
 - Low-priority CPU tasks (Priority 1-3) are free and not limited by project budget — useful when budget is exhausted.
 - To capture output for debugging, append: 2>&1 | tee /inspire/hdd/project/{en_name}/logs/{job_name}.log
-- Images must match the target workspace's registry (two independent registries):
-    docker-qb.sii.edu.cn (七宝): 可上网GPU资源, CPU资源空间, 国产卡, PPU
-    docker.sii.shaipower.online (松江): 分布式训练空间, 高性能计算
-  Cross-registry use requires: pull → retag → push to the other. Images must be registered on the platform after push.
+- Images must use the platform-assigned address (docker.sii.shaipower.online/...), not the push address (docker-qb.sii.edu.cn/...).
+  SJ资源空间 uses a separate registry: docker-t.sii.shaipower.online.
+  Images must be registered on the platform after push (镜像管理 → 新建镜像, fill in 镜像名称 and 版本号).
 - For internet-enabled workspaces, use HF mirror for faster downloads: export HF_ENDPOINT=https://hf-mirror.com
 
 Requires platform API access. If your account has not been granted API access, this tool will return an error — contact the platform administrator to enable it.

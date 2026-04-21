@@ -13,10 +13,9 @@ Usage:
 - search: find images by keyword (matches repository name, e.g. "torch", "cuda12")
 - repo: view all versions (tags) of a specific image
 
-This tool queries ${InspireTypes.HARBOR_REGISTRY} (七宝 registry). Two independent registries exist:
-- ${InspireTypes.HARBOR_REGISTRY}: for 可上网GPU资源, CPU资源空间, 国产卡, PPU
-- docker.sii.shaipower.online: for 分布式训练空间, 高性能计算
-Images are NOT shared between registries. Use inspire_image_push to push new images.`
+This tool queries ${InspireTypes.HARBOR_REGISTRY} which serves all spaces except SJ资源空间.
+SJ资源空间 uses a separate registry (docker-t.sii.edu.cn).
+Note: push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain (docker.sii.shaipower.online). Use inspire_image_push to push new images.`
 
 export const inspireImages = tool({
   description: DESCRIPTION,
