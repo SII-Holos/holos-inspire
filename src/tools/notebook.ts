@@ -6,7 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
-import { STATUS_LABELS, requireWorkspace, requireProject, specNotFoundError, requireAuth } from "../shared"
+import { STATUS_LABELS, requireWorkspace, requireProject, specNotFoundError, listAvailableSpecs, requireAuth } from "../shared"
 
 const DESCRIPTION = `Manage interactive notebook environments on the SII 启智平台.
 
@@ -251,18 +251,30 @@ async function handleCreate(params: any) {
 
   const specId = params.spec
   if (!specId) {
-    return specNotFoundError(ws.id, cg.id, cg.name)
+    return specNotFoundError(ws.id, cg.id, cg.name, "SCHEDULE_CONFIG_TYPE_DSW")
   }
+
+  const specs = await listAvailableSpecs(ws.id, cg.id, "SCHEDULE_CONFIG_TYPE_DSW")
+  const matchedSpec = specs.find((s) => s.quota_id === specId)
 
   const image = params.image ?? sii.defaultImage
   if (!image) {
     return {
       title: "缺少镜像",
-      output: "未指定 image 且未设置 sii.defaultImage。请用 inspire_images 查找或 inspire_config 设置默认镜像。",
+      output: "未指定 image 且未设置默认镜像。请用 inspire_images 查找可用镜像。",
       metadata: { error: "missing_image" },
     }
   }
   if (!params.image && sii.defaultImage) defaults.push(`镜像: ${image} (默认)`)
+
+  let mirrorId: string | undefined
+  try {
+    const { images } = await InspireAuth.withCookieRetry((c: string) =>
+      InspireAPI.listPlatformImages(c, ws.id, {}),
+    )
+    const match = images.find((img: any) => img.address === image || img.name === image)
+    if (match) mirrorId = match.image_id
+  } catch {}
 
   const projects = await InspireCache.getProjects()
   const projFull = projects.find((p: any) => p.id === proj.id)
@@ -288,16 +300,34 @@ async function handleCreate(params: any) {
     project_id: proj.id,
     name: params.name,
     logic_compute_group_id: cg.id,
-    resource_spec_price: { quota_id: specId },
+    quota_id: specId,
     mirror_url: image,
     task_priority: priority,
+    runtime: "standard",
+    enable_notification: true,
+  }
+
+  if (matchedSpec) {
+    body.resource_spec_price = {
+      quota_id: specId,
+      cpu_count: matchedSpec.cpu_count,
+      gpu_count: matchedSpec.gpu_count,
+      memory_size_gib: matchedSpec.memory_size_gib,
+    }
+    body.cpu_count = matchedSpec.cpu_count
+    body.gpu_count = matchedSpec.gpu_count
+    body.memory_size = matchedSpec.memory_size_gib
+  } else {
+    body.resource_spec_price = { quota_id: specId }
   }
 
   if (params.command) body.command = params.command
   if (params.description) body.description = params.description
-  if (params.gpu_count) body.gpu_count = params.gpu_count
-  if (params.cpu_count) body.cpu_count = params.cpu_count
-  if (params.memory_size) body.memory_size = params.memory_size
+  if (params.gpu_count) { body.gpu_count = params.gpu_count }
+  if (params.cpu_count) { body.cpu_count = params.cpu_count }
+  if (params.memory_size) { body.memory_size = params.memory_size }
+  if (sii.defaultShm) body.shared_memory_size = sii.defaultShm / 1024
+  if (mirrorId) body.mirror_id = mirrorId
 
   let result: any
   try {
