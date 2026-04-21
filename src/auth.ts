@@ -52,20 +52,28 @@ export namespace InspireAuth {
     await pluginAuth().set("inspire-password", password)
   }
 
-  export async function getHarborCredentials(): Promise<InspireTypes.HarborAuth | undefined> {
+  export async function getHarborCredentials(
+    target: InspireTypes.HarborTarget = "qb",
+  ): Promise<InspireTypes.HarborAuth | undefined> {
+    const suffix = target === "sj" ? "-sj" : ""
     try {
-      const username = await pluginAuth().get("harbor-username")
-      const password = await pluginAuth().get("harbor-password")
+      const username = await pluginAuth().get(`harbor${suffix}-username`)
+      const password = await pluginAuth().get(`harbor${suffix}-password`)
       if (!username || !password) return undefined
-      return { username, password, registry: InspireTypes.HARBOR_REGISTRY, saved_at: 0 }
+      return { username, password, registry: InspireTypes.harborRegistry(target), saved_at: 0 }
     } catch {
       return undefined
     }
   }
 
-  export async function saveHarborCredentials(username: string, password: string): Promise<void> {
-    await pluginAuth().set("harbor-username", username)
-    await pluginAuth().set("harbor-password", password)
+  export async function saveHarborCredentials(
+    username: string,
+    password: string,
+    target: InspireTypes.HarborTarget = "qb",
+  ): Promise<void> {
+    const suffix = target === "sj" ? "-sj" : ""
+    await pluginAuth().set(`harbor${suffix}-username`, username)
+    await pluginAuth().set(`harbor${suffix}-password`, password)
   }
 
   export async function requireToken(): Promise<string> {
@@ -379,11 +387,12 @@ export namespace InspireAuth {
     }
   }
 
-  export async function testHarborConnection(): Promise<boolean> {
-    const creds = await getHarborCredentials()
+  export async function testHarborConnection(target: InspireTypes.HarborTarget = "qb"): Promise<boolean> {
+    const creds = await getHarborCredentials(target)
     if (!creds) return false
     try {
-      const resp = await fetch(`https://${InspireTypes.HARBOR_REGISTRY}/api/v2.0/projects?page_size=1`, {
+      const registry = InspireTypes.harborRegistry(target)
+      const resp = await fetch(`https://${registry}/api/v2.0/projects?page_size=1`, {
         headers: { Authorization: "Basic " + btoa(`${creds.username}:${creds.password}`) },
       })
       return resp.ok

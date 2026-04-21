@@ -118,7 +118,14 @@ export namespace InspireTypes {
 
   export const PLATFORM_URL = "https://qz.sii.edu.cn"
   export const HARBOR_REGISTRY = "docker-qb.sii.edu.cn"
+  export const HARBOR_REGISTRY_SJ = "docker-t.sii.edu.cn"
   export const HARBOR_PROJECT = "inspire-studio"
+
+  export type HarborTarget = "qb" | "sj"
+
+  export function harborRegistry(target: HarborTarget = "qb"): string {
+    return target === "sj" ? HARBOR_REGISTRY_SJ : HARBOR_REGISTRY
+  }
 
   export const BROWSER_HEADERS = {
     accept: "application/json, text/plain, */*",

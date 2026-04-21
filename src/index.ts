@@ -76,18 +76,21 @@ export const InspirePlugin: Plugin = {
           },
         },
         "harbor-login": {
-          description: "Login to Harbor registry",
+          description: "Login to Harbor registry (七宝 by default, use --registry sj for 松江)",
           options: {
-            username: { type: "string", description: "Harbor username" },
+            username: { type: "string", description: "Harbor username (robot$inspire-studio+user-...)" },
             password: { type: "string", description: "Harbor password" },
+            registry: { type: "string", description: "Target registry: qb (七宝, default) or sj (松江)" },
           },
           async execute(args) {
             const { InspireAuth } = await import("./auth")
-            await InspireAuth.saveHarborCredentials(args.username, args.password)
-            const ok = await InspireAuth.testHarborConnection()
+            const target = args.registry === "sj" ? "sj" as const : "qb" as const
+            await InspireAuth.saveHarborCredentials(args.username, args.password, target)
+            const ok = await InspireAuth.testHarborConnection(target)
+            const registryName = target === "sj" ? "docker-t.sii.edu.cn (松江)" : "docker-qb.sii.edu.cn (七宝)"
             return ok
-              ? "✅ Harbor 镜像仓库认证成功 (docker-qb.sii.edu.cn)"
-              : "⚠️ 凭证已保存，但连接验证失败（可能需要 VPN 或校园网环境）"
+              ? `✅ Harbor 认证成功 (${registryName})`
+              : `⚠️ 凭证已保存，但连接验证失败（可能需要 VPN 或校园网环境）(${registryName})`
           },
         },
       },

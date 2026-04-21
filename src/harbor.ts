@@ -125,11 +125,16 @@ export namespace InspireHarbor {
     localImage: string
     remoteName: string
     remoteTag: string
+    target?: InspireTypes.HarborTarget
   }): Promise<{ fullPath: string; digest?: string }> {
-    const creds = await InspireAuth.getHarborCredentials()
-    if (!creds) throw new Error("harbor_not_authenticated")
+    const target = opts.target ?? "qb"
+    const creds = await InspireAuth.getHarborCredentials(target)
+    if (!creds) {
+      const registryName = target === "sj" ? "松江 (docker-t.sii.edu.cn)" : "七宝 (docker-qb.sii.edu.cn)"
+      throw new Error(`harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --registry ${target}`)
+    }
 
-    const registry = InspireTypes.HARBOR_REGISTRY
+    const registry = InspireTypes.harborRegistry(target)
     const fullPath = `${registry}/${PROJECT}/${opts.remoteName}:${opts.remoteTag}`
 
     const hasDocker = await checkDocker()

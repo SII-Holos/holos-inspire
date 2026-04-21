@@ -30,8 +30,12 @@ export const inspireImagePush = tool({
     name: z
       .string()
       .optional()
-      .describe("Remote repository name. Defaults to the image name part. Final path: inspire-studio/{name}"),
-    tag: z.string().optional().describe("Remote tag. Defaults to the image tag part"),
+      .describe("Remote 镜像名称. Defaults to the image name part. Final path: inspire-studio/{name}"),
+    tag: z.string().optional().describe("Remote 版本号. Defaults to the image tag part"),
+    registry: z
+      .enum(["qb", "sj"])
+      .optional()
+      .describe("Target registry: 'qb' (七宝, default, most spaces) or 'sj' (松江, SJ资源空间 only)"),
     description: z
       .string()
       .optional()
@@ -59,6 +63,7 @@ export const inspireImagePush = tool({
         localImage: params.image,
         remoteName,
         remoteTag,
+        target: params.registry,
       })
 
       let descriptionSet = false
