@@ -68,37 +68,6 @@ export namespace InspireCache {
     }
   }
 
-  export async function resolveAvailableSpecs(
-    workspaceId: string,
-    computeGroupId: string,
-    scheduleType?: string,
-  ): Promise<InspireAPI.ResourceSpec[]> {
-    try {
-      return await InspireAuth.withCookieRetry((cookie) =>
-        InspireAPI.listResourceSpecs(cookie, workspaceId, computeGroupId, scheduleType),
-      )
-    } catch {
-      return []
-    }
-  }
-
-  export async function resolveSpecId(workspaceId: string, computeGroupId: string): Promise<string | undefined> {
-    const cached = getCachedSpecId(workspaceId, computeGroupId)
-    if (cached) return cached
-
-    const specs = await resolveAvailableSpecs(workspaceId, computeGroupId)
-    if (specs.length > 0) {
-      const spec = specs[0]
-      setCachedSpecId(workspaceId, computeGroupId, spec.quota_id, {
-        gpuCount: spec.gpu_count,
-        gpuType: spec.gpu_info?.gpu_product_simple ?? "",
-      })
-      return spec.quota_id
-    }
-
-    return undefined
-  }
-
   export async function refresh(): Promise<void> {
     const projects = await InspireAuth.withCookieRetry((cookie) => InspireAPI.listProjects(cookie))
 

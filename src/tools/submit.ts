@@ -6,6 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireTypes } from "../types"
+import { specNotFoundError, specInvalidError } from "../shared"
 
 const DESCRIPTION = `Submit a GPU training task on the SII 启智平台.
 
@@ -42,9 +43,9 @@ export const inspireSubmit = tool({
     compute_group: z
       .string()
       .optional()
-      .describe("Compute group name or ID. Uses sii.defaultComputeGroup or auto-selects if omitted"),
+      .describe("Compute group name or ID. Auto-selects if omitted"),
     project: z.string().optional().describe("Project name or ID. Uses sii.defaultProject or auto-selects if omitted"),
-    spec: z.string().optional().describe("Spec/quota ID. Uses sii.defaultSpecId or auto-resolves if omitted"),
+    spec: z.string().optional().describe("Spec/quota ID. Call inspire_status to see available specs"),
     image: z.string().optional().describe("Docker image address. Uses sii.defaultImage if omitted"),
     image_type: z
       .enum(["SOURCE_PUBLIC", "SOURCE_PRIVATE", "SOURCE_OFFICIAL"])
@@ -96,9 +97,8 @@ export const inspireSubmit = tool({
     }
     if (!params.project && sii.defaultProject) defaults.push(`项目: ${proj.name} (默认)`)
 
-    const cgInput = params.compute_group ?? sii.defaultComputeGroup
-    const cg = cgInput
-      ? await InspireResolve.computeGroup(cgInput, ws.id)
+    const cg = params.compute_group
+      ? await InspireResolve.computeGroup(params.compute_group, ws.id)
       : await InspireResolve.firstComputeGroup(ws.id)
     if (!cg) {
       return {
@@ -107,26 +107,9 @@ export const inspireSubmit = tool({
         metadata: { error: "compute_group_not_found" } as Record<string, any>,
       }
     }
-    if (!params.compute_group && sii.defaultComputeGroup) defaults.push(`计算组: ${cg.name} (默认)`)
-    else if (!params.compute_group) warnings.push(`自动选择计算组: ${cg.name}`)
+    if (!params.compute_group) warnings.push(`自动选择计算组: ${cg.name}`)
 
-    let specId = params.spec ?? sii.defaultSpecId
-    if (!specId) {
-      const cached = InspireCache.getCachedSpecId(ws.id, cg.id)
-      if (cached) {
-        specId = cached
-        defaults.push(`规格 ID: ${specId} (缓存)`)
-      }
-    }
-    if (!specId) {
-      const resolved = await InspireCache.resolveSpecId(ws.id, cg.id)
-      if (resolved) {
-        specId = resolved
-        warnings.push(`自动解析规格 ID: ${specId}`)
-      }
-    }
-    if (!params.spec && sii.defaultSpecId) defaults.push(`规格 ID: ${specId} (默认)`)
-    else if (!params.spec && !sii.defaultSpecId && specId) warnings.push(`使用解析的规格 ID: ${specId}`)
+    const specId = params.spec
 
     const image = params.image ?? sii.defaultImage
     if (!image) {
@@ -216,40 +199,7 @@ export const inspireSubmit = tool({
     }
 
     if (!specId) {
-      const availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id)
-      if (availableSpecs.length > 0) {
-        const lines = [
-          "未指定 spec_id。当前计算组可用的资源规格如下：",
-          "",
-          "| GPU | CPU | 内存(GB) | 价格(点券/h) | spec_id |",
-          "|-----|-----|----------|-------------|---------|",
-        ]
-        for (const s of availableSpecs) {
-          lines.push(`| ${s.gpu_count} | ${s.cpu_count} | ${s.memory_size_gib} | ${s.total_price_per_hour} | ${s.quota_id} |`)
-        }
-        lines.push(
-          "",
-          "请根据任务需求选择合适的规格：",
-          "- 多机训练建议选整节点（如 8 GPU）避免资源碎片化",
-          "- 单卡调试可选最小规格",
-          "- 选定后用 spec 参数传入，或用 inspire_config 设为默认值",
-        )
-        return {
-          title: "请选择资源规格",
-          output: lines.join("\n"),
-          metadata: { error: "spec_id_required", available_specs: availableSpecs } as Record<string, any>,
-        }
-      }
-      return {
-        title: "缺少规格 ID",
-        output: [
-          "未指定 spec_id 且无法查询可用规格。",
-          "",
-          "获取方式：在平台 UI 新建任务页面选择计算类型组后可看到规格 ID。",
-          '设置默认值: inspire_config(action="set", key="defaultSpecId", value="...")',
-        ].join("\n"),
-        metadata: { error: "missing_spec_id" } as Record<string, any>,
-      }
+      return specNotFoundError(ws.id, cg.id, cg.name)
     }
 
     let result: any
@@ -273,30 +223,7 @@ export const inspireSubmit = tool({
     } catch (err: any) {
       const msg = String(err?.message ?? err)
       if (msg.includes("spec_id") || msg.includes("SpecId") || msg.includes("spec not found") || msg.includes("predef_train_spec")) {
-        const availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id)
-        const lines = [
-          `spec_id "${specId}" 无效（计算组: ${cg.name}）。`,
-          "",
-        ]
-        if (availableSpecs.length > 0) {
-          lines.push(
-            "当前计算组可用规格：",
-            "",
-            "| GPU | CPU | 内存(GB) | 价格(点券/h) | spec_id |",
-            "|-----|-----|----------|-------------|---------|",
-          )
-          for (const s of availableSpecs) {
-            lines.push(`| ${s.gpu_count} | ${s.cpu_count} | ${s.memory_size_gib} | ${s.total_price_per_hour} | ${s.quota_id} |`)
-          }
-          lines.push("", '请选择正确的 spec_id 重新提交，或用 inspire_config(action="set", key="defaultSpecId", value="...") 更新默认值。')
-        } else {
-          lines.push("无法查询可用规格列表。请在平台 UI 新建任务时查看规格 ID。")
-        }
-        return {
-          title: "提交失败: 规格 ID 无效",
-          output: lines.join("\n"),
-          metadata: { error: "invalid_spec_id", spec_id: specId, compute_group: cg.name, available_specs: availableSpecs } as Record<string, any>,
-        }
+        return specInvalidError(specId!, ws.id, cg.id, cg.name)
       }
       return {
         title: "提交失败",

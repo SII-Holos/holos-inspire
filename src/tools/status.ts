@@ -6,6 +6,7 @@ import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
 import { InspireTypes } from "../types"
+import { listAvailableSpecs } from "../shared"
 
 const DESCRIPTION = `Query SII 启智平台 project, workspace, GPU resource, and constraint information. Returns the full decision context in one call: which projects you belong to, which workspaces are available, GPU availability per compute group, available specs, max priority, remaining budget, and storage paths.
 
@@ -144,7 +145,7 @@ export const inspireStatus = tool({
               lines.push(`        - ${g.name} (${g.id}): ${gpuInfo}`)
 
               try {
-                const specs = await InspireCache.resolveAvailableSpecs(space.id, g.id)
+                const specs = await listAvailableSpecs(space.id, g.id)
                 if (specs.length > 0) {
                   lines.push("          可用规格:")
                   for (const s of specs) {

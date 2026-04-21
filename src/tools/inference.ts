@@ -6,6 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
+import { specNotFoundError } from "../shared"
 
 const DESCRIPTION = `Deploy and manage inference services (模型部署) on the SII 启智平台.
 
@@ -45,7 +46,7 @@ export const inspireInference = tool({
     workspace: z.string().optional().describe("Workspace name or ID. Uses sii.defaultWorkspace if omitted"),
     compute_group: z.string().optional().describe("Compute group name or ID. Auto-selects if omitted"),
     project: z.string().optional().describe("Project name or ID. Uses default or auto-selects if omitted"),
-    spec: z.string().optional().describe("Spec/quota ID. Uses sii.defaultSpecId or auto-resolves if omitted"),
+    spec: z.string().optional().describe("Spec/quota ID. Call inspire_status to see available specs"),
     priority: z.number().optional().describe("Task priority. Uses sii.defaultPriority or project max if omitted"),
   },
   async execute(params, ctx) {
@@ -110,24 +111,9 @@ async function handleCreate(params: any) {
     return { title: "缺少镜像", output: "未指定 image。", metadata: { error: "missing_image" } }
   }
 
-  let specId = params.spec ?? sii.defaultSpecId
-  if (!specId) specId = InspireCache.getCachedSpecId(ws.id, cg.id)
+  const specId = params.spec
   if (!specId) {
-    const resolved = await InspireCache.resolveSpecId(ws.id, cg.id)
-    if (resolved) specId = resolved
-  }
-  if (!specId) {
-    return {
-      title: "缺少规格 ID",
-      output: [
-        "未指定 spec_id 且无法自动解析。",
-        "",
-        "获取方式：",
-        "1. 调用 inspire_job_detail 查看已有任务的「规格 ID (quota_id)」",
-        '2. 用 inspire_config(action="set", key="defaultSpecId", value="...") 设置默认值',
-      ].join("\n"),
-      metadata: { error: "missing_spec_id" },
-    }
+    return specNotFoundError(ws.id, cg.id, cg.name)
   }
 
   const projects = await InspireCache.getProjects()

@@ -6,8 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
-import { InspireTypes } from "../types"
-import { STATUS_LABELS, requireWorkspace, requireProject } from "../shared"
+import { STATUS_LABELS, requireWorkspace, requireProject, specNotFoundError } from "../shared"
 
 const DESCRIPTION = `Manage interactive notebook environments on the SII 启智平台.
 
@@ -245,8 +244,9 @@ async function handleCreate(params: any) {
   if (!("proj" in projResult)) return projResult
   const proj = projResult.proj
 
-  const cgInput = params.compute_group ?? sii.defaultComputeGroup
-  const cg = cgInput ? await InspireResolve.computeGroup(cgInput, ws.id) : await InspireResolve.firstComputeGroup(ws.id)
+  const cg = params.compute_group
+    ? await InspireResolve.computeGroup(params.compute_group, ws.id)
+    : await InspireResolve.firstComputeGroup(ws.id)
   if (!cg) {
     return {
       title: "计算组未找到",
@@ -254,28 +254,11 @@ async function handleCreate(params: any) {
       metadata: { error: "compute_group_not_found" },
     }
   }
-  if (!params.compute_group && sii.defaultComputeGroup) defaults.push(`计算组: ${cg.name} (默认)`)
 
-  let specId = params.spec ?? sii.defaultSpecId
-  if (!specId) specId = InspireCache.getCachedSpecId(ws.id, cg.id)
+  const specId = params.spec
   if (!specId) {
-    const resolved = await InspireCache.resolveSpecId(ws.id, cg.id)
-    if (resolved) specId = resolved
+    return specNotFoundError(ws.id, cg.id, cg.name)
   }
-  if (!specId) {
-    return {
-      title: "缺少规格 ID",
-      output: [
-        "未指定 spec_id 且无法自动解析。",
-        "",
-        "获取方式：",
-        "1. 调用 inspire_job_detail 查看已有任务的「规格 ID (quota_id)」",
-        '2. 用 inspire_config(action="set", key="defaultSpecId", value="...") 设置默认值',
-      ].join("\n"),
-      metadata: { error: "missing_spec_id" },
-    }
-  }
-  if (!params.spec && sii.defaultSpecId) defaults.push(`规格 ID: ${specId} (默认)`)
 
   const image = params.image ?? sii.defaultImage
   if (!image) {

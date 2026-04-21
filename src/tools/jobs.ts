@@ -76,6 +76,8 @@ export const inspireJobs = tool({
       created_at: string
       running_time_ms?: string
       type: "gpu" | "hpc"
+      spec_id?: string
+      compute_group?: string
     }
 
     const allJobs: JobEntry[] = []
@@ -98,19 +100,21 @@ export const inspireJobs = tool({
             if (projectFilter && job.project_id !== projectFilter.id) continue
 
             const info = InspireAPI.extractGpuInfo(job)
-            allJobs.push({
-              name: job.name ?? job.job_name ?? "",
-              job_id: job.job_id ?? job.id ?? "",
-              status: s,
-              workspace_name: ws.name,
-              project_name: job.project_name ?? "",
-              project_id: job.project_id ?? "",
-              gpu_count: info.gpu_count,
-              priority: job.priority_name ?? job.priority ?? "",
-              created_at: job.created_at ?? "",
-              running_time_ms: job.running_time_ms,
-              type: "gpu",
-            })
+           allJobs.push({
+             name: job.name ?? job.job_name ?? "",
+             job_id: job.job_id ?? job.id ?? "",
+             status: s,
+             workspace_name: ws.name,
+             project_name: job.project_name ?? "",
+             project_id: job.project_id ?? "",
+             gpu_count: info.gpu_count,
+             priority: job.priority_name ?? job.priority ?? "",
+             created_at: job.created_at ?? "",
+             running_time_ms: job.running_time_ms,
+             type: "gpu",
+             spec_id: InspireAPI.extractSpecId(job),
+             compute_group: job.logic_compute_group_name ?? "",
+           })
           }
         } catch (err: any) {
           if (String(err).includes("inspire_not_authenticated")) {
@@ -179,9 +183,12 @@ export const inspireJobs = tool({
       const label = STATUS_LABELS[j.status.family] ?? j.status.raw
       const typeTag = j.type === "hpc" ? " [HPC]" : ""
       lines.push(`${offset + i + 1}. [${label}] ${j.name}${typeTag}`)
-      lines.push(
-        `   ID: ${j.job_id}${j.gpu_count > 0 ? ` | GPU: ${j.gpu_count}卡` : ""}${j.priority ? ` | 优先级: ${j.priority}` : ""}`,
-      )
+      const parts = [`ID: ${j.job_id}`]
+      if (j.gpu_count > 0) parts.push(`GPU: ${j.gpu_count}卡`)
+      if (j.priority) parts.push(`优先级: ${j.priority}`)
+      if (j.compute_group) parts.push(`计算组: ${j.compute_group}`)
+      if (j.spec_id) parts.push(`spec: ${j.spec_id}`)
+      lines.push(`   ${parts.join(" | ")}`)
       lines.push(`   空间: ${j.workspace_name} | 项目: ${j.project_name}`)
 
       const duration = InspireNormalize.formatDuration(j.running_time_ms)
