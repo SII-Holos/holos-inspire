@@ -252,14 +252,17 @@ export const inspireSubmit = tool({
         return {
           title: "提交失败: 规格 ID 无效",
           output: [
-            `spec_id "${specId}" 无效，可能不属于当前空间/计算组。`,
+            `spec_id "${specId}" 无效，可能不属于当前计算组 "${cg.name}" 或已过期。`,
             "",
-            "建议:",
-            "  1. 用 inspire_job_detail 查看同空间下成功任务的 quota_id",
-            '  2. 更新默认值: inspire_config(action="set", key="defaultSpecId", value="正确的quota_id")',
-            "  3. 确认镜像地址与空间集群匹配",
+            "每个计算组有自己的 spec_id（即 quota_id），不能跨计算组使用，平台更新规格配置后旧 ID 会失效。",
+            "",
+            "获取正确的 spec_id:",
+            "  1. 在平台 UI 上对同一计算组创建一个 demo 任务（命令填 echo test）",
+            "  2. 用 inspire_job_detail 查看该任务的 quota_id",
+            "  3. 用 inspire_config 设置 defaultSpecId 为该值",
+            "  4. 清除旧缓存: inspire_config(action=\"set\", key=\"defaultSpecId\", value=\"\")",
           ].join("\n"),
-          metadata: { error: "invalid_spec_id", spec_id: specId } as Record<string, any>,
+          metadata: { error: "invalid_spec_id", spec_id: specId, compute_group: cg.name } as Record<string, any>,
         }
       }
       return {

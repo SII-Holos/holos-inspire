@@ -12,9 +12,16 @@ Prerequisites:
 - Harbor credentials configured (synergy inspire harbor-login). Harbor password is separate from platform password — find it on the platform under 镜像管理 → 本地推送
 - Must be on VPN or campus network
 
-After pushing:
-- You MUST claim the image on the platform: go to 镜像管理 → 新建镜像, fill in the repository name and tag
-- The registry only covers 七宝 cluster (${InspireTypes.HARBOR_REGISTRY}). 松江 cluster uses a separate registry (docker.sii.shaipower.online). Images are NOT shared between them.
+IMPORTANT — after pushing, the image exists in Harbor but is NOT yet visible to the platform:
+1. Go to 镜像管理 → 新建镜像, fill in the repository name and tag, then save. This registers the image in the platform database.
+2. Alternatively, from within a running notebook terminal, use nerdctl to pull and re-push the image — this also triggers database sync.
+3. Until this step is done, the image cannot be used for task submission or notebook creation.
+
+Registry coverage:
+- ${InspireTypes.HARBOR_REGISTRY} covers 七宝 cluster only
+- docker.sii.shaipower.online covers 松江 cluster only
+- Images are NOT shared between clusters. A task running in a 松江 workspace cannot use a 七宝 image, and vice versa.
+- Check which cluster your target workspace belongs to via inspire_status before pushing.
 
 Use the returned full image address in inspire_submit's image parameter.`
 

@@ -73,29 +73,11 @@ export namespace InspireCache {
     if (cached) return cached
 
     try {
-      const specs = await InspireAuth.withCookieRetry((cookie) => InspireAPI.listSpecs(cookie, computeGroupId))
-      if (specs.length > 0) {
-        const spec = specs[0]
-        const specId = spec.id ?? spec.quota_id
-        if (specId) {
-          setCachedSpecId(workspaceId, computeGroupId, specId, {
-            gpuCount: spec.gpu_count ?? 0,
-            cpuCount: spec.cpu_count ?? 0,
-            memGi: spec.mem_gi ?? 0,
-            gpuType: spec.gpu_type ?? "",
-          })
-          return specId
-        }
-      }
-    } catch (err) {
-      console.warn("[inspire.cache] failed to resolve spec_id from specs API", computeGroupId, String(err))
-    }
-
-    try {
       const { jobs } = await InspireAuth.withCookieRetry((cookie) =>
         InspireAPI.listJobsWithCookie(cookie, workspaceId, { pageSize: 50 }),
       )
       for (const job of jobs) {
+        if (job.logic_compute_group_id !== computeGroupId) continue
         const specId = InspireAPI.extractSpecId(job)
         if (specId) {
           const gpuInfo = InspireAPI.extractGpuInfo(job)
