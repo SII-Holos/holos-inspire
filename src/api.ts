@@ -47,7 +47,16 @@ export namespace InspireAPI {
       body: JSON.stringify(body),
     })
     if (resp.status === 401) throw Object.assign(new Error("Cookie expired"), { status: 401 })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    if (!resp.ok) {
+      let detail = ""
+      try {
+        const errData = (await resp.json()) as any
+        detail = errData.message ?? errData.msg ?? JSON.stringify(errData)
+      } catch {
+        try { detail = await resp.text() } catch {}
+      }
+      throw new Error(`HTTP ${resp.status}${detail ? `: ${detail}` : ""}`)
+    }
     const data = (await resp.json()) as any
     if (data.code !== 0) throw new Error(data.message ?? `API error code ${data.code}`)
     return data.data ?? data

@@ -228,17 +228,9 @@ async function handleCreate(params: any) {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const sii = await pluginConfig().get()
-  const projResult = await requireProject(undefined, ws.id)
+  const projResult = await requireProject(params.project, ws.id)
   if (!("proj" in projResult)) return projResult
   const proj = projResult.proj
-  if (!proj) {
-    return {
-      title: "项目未找到",
-      output: "未找到项目。请通过 sii.defaultProject 设置默认项目。",
-      metadata: { error: "project_not_found" },
-    }
-  }
 
   const cookie = await InspireAuth.requireCookie()
 

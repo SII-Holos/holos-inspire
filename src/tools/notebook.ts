@@ -241,7 +241,7 @@ async function handleCreate(params: any) {
   const ws = wsResult.ws
   if (!params.workspace && sii.defaultWorkspace) defaults.push(`空间: ${ws.name} (默认)`)
 
-  const projResult = await requireProject(undefined, ws.id)
+  const projResult = await requireProject(params.project, ws.id)
   if (!("proj" in projResult)) return projResult
   const proj = projResult.proj
 
