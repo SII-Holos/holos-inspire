@@ -20,17 +20,22 @@ export namespace InspireAPI {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
-    if (resp.status === 401 || resp.status === 302 || resp.status === 403) {
-      throw Object.assign(new Error("Authentication expired or invalid"), { code: -1, status: resp.status })
-    }
     const text = await resp.text()
     let data: any
     try {
       data = JSON.parse(text)
     } catch {
+      if (resp.status === 401 || resp.status === 302) {
+        throw Object.assign(new Error("Authentication expired or invalid"), { code: -1, status: resp.status })
+      }
       throw Object.assign(new Error(`API returned non-JSON response (HTTP ${resp.status})`), { status: resp.status })
     }
-    if (data.code === -1) throw Object.assign(new Error("Authentication expired"), { code: -1 })
+    if (resp.status === 401 || data.code === -1) {
+      throw Object.assign(new Error("Authentication expired"), { code: -1, status: resp.status })
+    }
+    if (resp.status === 403 || resp.status === 302) {
+      throw new Error(data.message ?? `Permission denied (HTTP ${resp.status})`)
+    }
     if (data.code !== 0) throw new Error(data.message ?? `API error code ${data.code}`)
     return data.data ?? data
   }
@@ -465,6 +470,21 @@ export namespace InspireAPI {
     }
     const data = await postInternal("/api/v1/notebook/list", body, cookie, workspaceId)
     return { items: data.list ?? [], total: data.total ?? 0 }
+  }
+
+  export async function listPlatformImages(
+    cookie: string,
+    workspaceId: string,
+    opts?: { search?: string; imageType?: string; pageNum?: number; pageSize?: number },
+  ): Promise<{ images: any[]; total: number }> {
+    const payload: Record<string, any> = {
+      page_num: opts?.pageNum ?? 1,
+      page_size: opts?.pageSize ?? 50,
+    }
+    if (opts?.search) payload.keyword = opts.search
+    if (opts?.imageType) payload.image_type = opts.imageType
+    const data = await postInternal("/api/v1/image/list", payload, cookie, workspaceId)
+    return { images: data.images ?? data.list ?? data.items ?? [], total: data.total ?? 0 }
   }
 
   export async function getNotebookDetail(cookie: string, notebookId: string): Promise<any> {

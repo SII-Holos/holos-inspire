@@ -71,10 +71,11 @@ export namespace InspireCache {
   export async function resolveAvailableSpecs(
     workspaceId: string,
     computeGroupId: string,
+    scheduleType?: string,
   ): Promise<InspireAPI.ResourceSpec[]> {
     try {
       return await InspireAuth.withCookieRetry((cookie) =>
-        InspireAPI.listResourceSpecs(cookie, workspaceId, computeGroupId),
+        InspireAPI.listResourceSpecs(cookie, workspaceId, computeGroupId, scheduleType),
       )
     } catch {
       return []

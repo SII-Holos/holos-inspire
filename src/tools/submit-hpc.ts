@@ -129,14 +129,39 @@ export const inspireSubmitHpc = tool({
       const token = await InspireAuth.ensureToken()
 
       if (!specId) {
+        let availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id, "SCHEDULE_CONFIG_TYPE_HPC")
+        if (availableSpecs.length === 0) {
+          availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id, "SCHEDULE_CONFIG_TYPE_TRAIN")
+        }
+        if (availableSpecs.length > 0) {
+          const lines = [
+            "未指定 spec_id。当前计算组可用的资源规格如下：",
+            "",
+            "| GPU | CPU | 内存(GB) | 价格(点券/h) | spec_id |",
+            "|-----|-----|----------|-------------|---------|",
+          ]
+          for (const s of availableSpecs) {
+            lines.push(`| ${s.gpu_count} | ${s.cpu_count} | ${s.memory_size_gib} | ${s.total_price_per_hour} | ${s.quota_id} |`)
+          }
+          lines.push(
+            "",
+            "请根据任务需求选择合适的规格：",
+            "- HPC 任务通常选择 CPU 规格（GPU=0）",
+            "- 选定后用 spec 参数传入，或用 inspire_config 设为默认值",
+          )
+          return {
+            title: "请选择资源规格",
+            output: lines.join("\n"),
+            metadata: { error: "spec_id_required", available_specs: availableSpecs } as Record<string, any>,
+          }
+        }
         return {
           title: "缺少规格 ID",
           output: [
-            "未指定 spec_id 且无法自动解析。",
+            "未指定 spec_id 且无法查询可用规格。",
             "",
-            "获取方式：",
-            "1. 调用 inspire_job_detail 查看已有任务的「规格 ID (quota_id)」",
-            '2. 用 inspire_config(action="set", key="defaultSpecId", value="...") 设置默认值',
+            "获取方式：在平台 UI 新建任务页面选择计算类型组后可看到规格 ID。",
+            '设置默认值: inspire_config(action="set", key="defaultSpecId", value="...")',
           ].join("\n"),
           metadata: { error: "missing_spec_id" } as Record<string, any>,
         }
@@ -166,6 +191,37 @@ export const inspireSubmitHpc = tool({
     } catch (err: any) {
       if (err instanceof InspireAuth.TokenUnavailableError && err.reason === "not_authenticated") {
         return InspireAuth.notAuthenticatedError("inspire")
+      }
+
+      const errMsg = String(err?.message ?? err)
+      if (errMsg.includes("spec_id") || errMsg.includes("SpecId") || errMsg.includes("spec not found") || errMsg.includes("predef")) {
+        let availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id, "SCHEDULE_CONFIG_TYPE_HPC")
+        if (availableSpecs.length === 0) {
+          availableSpecs = await InspireCache.resolveAvailableSpecs(ws.id, cg.id, "SCHEDULE_CONFIG_TYPE_TRAIN")
+        }
+        const lines = [
+          `spec_id "${specId}" 无效（计算组: ${cg.name}）。`,
+          "",
+        ]
+        if (availableSpecs.length > 0) {
+          lines.push(
+            "当前计算组可用规格：",
+            "",
+            "| GPU | CPU | 内存(GB) | 价格(点券/h) | spec_id |",
+            "|-----|-----|----------|-------------|---------|",
+          )
+          for (const s of availableSpecs) {
+            lines.push(`| ${s.gpu_count} | ${s.cpu_count} | ${s.memory_size_gib} | ${s.total_price_per_hour} | ${s.quota_id} |`)
+          }
+          lines.push("", '请选择正确的 spec_id 重新提交，或用 inspire_config(action="set", key="defaultSpecId", value="...") 更新默认值。')
+        } else {
+          lines.push("无法查询可用规格列表。请在平台 UI 新建任务时查看规格 ID。")
+        }
+        return {
+          title: "提交失败: 规格 ID 无效",
+          output: lines.join("\n"),
+          metadata: { error: "invalid_spec_id", spec_id: specId, compute_group: cg.name, available_specs: availableSpecs } as Record<string, any>,
+        }
       }
 
       if (!specId) {

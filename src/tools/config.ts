@@ -5,9 +5,7 @@ import { pluginConfig } from "../ctx"
 const VALID_KEYS = [
   "defaultProject",
   "defaultWorkspace",
-  "defaultComputeGroup",
   "defaultImage",
-  "defaultSpecId",
   "defaultPriority",
   "defaultShm",
   "commandPrefix",
@@ -18,11 +16,9 @@ type ConfigKey = (typeof VALID_KEYS)[number]
 const KEY_DESCRIPTIONS: Record<ConfigKey, string> = {
   defaultProject: "默认项目名称（如 '大模型时代下的多智能体系统'）",
   defaultWorkspace: "默认工作空间（如 '分布式训练空间'）",
-  defaultComputeGroup: "默认计算组（如 'cuda12.8版本H100'）",
-  defaultImage: "默认训练镜像（完整地址，如 'docker-qb.sii.edu.cn/inspire-studio/xxx:v1'）",
-  defaultSpecId: "默认资源规格 ID（即 quota_id，可从已有任务的 detail 中获取）",
+  defaultImage: "默认训练镜像（平台注册后的地址，如 'docker.sii.shaipower.online/inspire-studio/xxx:v1'）",
   defaultPriority: "默认任务优先级（数字 1-10，通常为项目最大值）",
-  defaultShm: "默认共享内存 MB（推荐 1200，多卡训练必须）",
+  defaultShm: "默认共享内存 MB（推荐 1200，多卡训练必须 ≥64GB）",
   commandPrefix:
     "命令前缀（如 'source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && cd /inspire/hdd/project/xxx/code'）。设置后 inspire_submit 的 command 自动拼接此前缀",
 }
@@ -32,19 +28,19 @@ const DESCRIPTION = `Read or write SII 启智平台 default configuration values
 Available configuration keys:
 - defaultProject: ${KEY_DESCRIPTIONS.defaultProject}
 - defaultWorkspace: ${KEY_DESCRIPTIONS.defaultWorkspace}
-- defaultComputeGroup: ${KEY_DESCRIPTIONS.defaultComputeGroup}
 - defaultImage: ${KEY_DESCRIPTIONS.defaultImage}
-- defaultSpecId: ${KEY_DESCRIPTIONS.defaultSpecId}
 - defaultPriority: ${KEY_DESCRIPTIONS.defaultPriority}
 - defaultShm: ${KEY_DESCRIPTIONS.defaultShm}
 - commandPrefix: ${KEY_DESCRIPTIONS.commandPrefix}
 
-Typical first-time setup flow:
-1. Call inspire_status to discover projects, workspaces, compute groups
-2. Call inspire_config(action="set", key="defaultProject", value="...") for each default
-3. After setup, inspire_submit only needs name + command (everything else uses defaults)
+Note: spec_id and compute group are NOT stored as defaults because they vary by workspace and compute group. Use inspire_status to see available compute groups and specs, then pass them to inspire_submit directly.
 
-The commandPrefix is especially valuable — it eliminates the need to type conda init + cd every time. With it set, inspire_submit automatically prepends it to your command.`
+Typical first-time setup flow:
+1. Call inspire_status to discover projects, workspaces, compute groups and their available specs
+2. Call inspire_config(action="set", key="defaultProject", value="...") for each default
+3. After setup, inspire_submit only needs name, command, compute_group, and spec — everything else uses defaults
+
+The commandPrefix is especially valuable — it eliminates the need to type conda init + cd every time.`
 
 export const inspireConfig = tool({
   description: DESCRIPTION,
@@ -54,7 +50,7 @@ export const inspireConfig = tool({
       .string()
       .optional()
       .describe(
-        "Config key to set (required for 'set'). One of: defaultProject, defaultWorkspace, defaultComputeGroup, defaultImage, defaultSpecId, defaultPriority, defaultShm, commandPrefix",
+        "Config key to set (required for 'set'). One of: defaultProject, defaultWorkspace, defaultImage, defaultPriority, defaultShm, commandPrefix",
       ),
     value: z
       .union([z.string(), z.number()])
@@ -65,9 +61,7 @@ export const inspireConfig = tool({
     const sii = await pluginConfig().get()
 
     if (params.action === "get") {
-      const lines = ["=== SII 启智平台默认配置 ===", ""]
-      lines.push(`启用状态: ${sii.enable ? "✅ 开启" : "❌ 关闭"}`)
-      lines.push("")
+      const lines = ["=== 启智平台默认配置 ===", ""]
 
       let hasAny = false
       for (const key of VALID_KEYS) {
@@ -98,7 +92,7 @@ export const inspireConfig = tool({
       }
 
       return {
-        title: "SII 配置",
+        title: "启智配置",
         output: lines.join("\n"),
         metadata: { action: "get", configured_keys: VALID_KEYS.filter((k) => sii[k] !== undefined) } as Record<
           string,
