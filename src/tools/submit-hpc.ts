@@ -5,7 +5,7 @@ import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
-import { specNotFoundError, specInvalidError } from "../shared"
+import { specNotFoundError, specInvalidError, requireAuth } from "../shared"
 
 const DESCRIPTION = `Submit an HPC/CPU task on the SII 启智平台 (Slurm scheduling). Use for data preprocessing, evaluation, CPU-intensive computation, or auxiliary tasks.
 
@@ -45,6 +45,9 @@ export const inspireSubmitHpc = tool({
     ttl_after_finish_seconds: z.number().optional().describe("Keep task after finish for N seconds (default 600)"),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     const sii = await pluginConfig().get()
     const warnings: string[] = []
     const defaults: string[] = []

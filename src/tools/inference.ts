@@ -6,7 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
-import { specNotFoundError } from "../shared"
+import { specNotFoundError, requireAuth } from "../shared"
 
 const DESCRIPTION = `Deploy and manage inference services (模型部署) on the SII 启智平台.
 
@@ -50,6 +50,9 @@ export const inspireInference = tool({
     priority: z.number().optional().describe("Task priority. Uses sii.defaultPriority or project max if omitted"),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     if (params.action === "create") return handleCreate(params)
     if (params.action === "detail") return handleDetail(params)
     if (params.action === "stop") return handleStop(params)

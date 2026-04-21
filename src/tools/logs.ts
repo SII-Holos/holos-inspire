@@ -2,6 +2,7 @@ import z from "zod"
 import { tool } from "@ericsanchezok/synergy-plugin"
 import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
+import { requireAuth } from "../shared"
 
 const DESCRIPTION = `Query or download training job logs from the SII 启智平台.
 
@@ -34,8 +35,8 @@ export const inspireLogs = tool({
     download_path: z.string().optional().describe("Local file path for download mode (default: /tmp/{job_id}-logs.txt)"),
   },
   async execute(params, ctx) {
-    const creds = await InspireAuth.getInspireCredentials()
-    if (!creds) return InspireAuth.notAuthenticatedError("inspire")
+    const authErr = await requireAuth()
+    if (authErr) return authErr
 
     if (params.job_id.startsWith("sv-") || params.job_id.startsWith("hpc-job-")) {
       return {

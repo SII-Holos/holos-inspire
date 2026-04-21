@@ -4,7 +4,7 @@ import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
 import { InspireNormalize } from "../normalize"
 import { InspireCache } from "../cache"
-import { classifyJobId } from "../shared"
+import { classifyJobId, requireAuth } from "../shared"
 
 async function findJobViaCookie(jobId: string): Promise<any | undefined> {
   const projects = await InspireCache.getProjects()
@@ -45,8 +45,8 @@ export const inspireJobDetail = tool({
     job_id: z.string().describe("Task ID to query (job-xxx, hpc-job-xxx, or sv-xxx)"),
   },
   async execute(params, ctx) {
-    const creds = await InspireAuth.getInspireCredentials()
-    if (!creds) return InspireAuth.notAuthenticatedError("inspire")
+    const authErr = await requireAuth()
+    if (authErr) return authErr
 
     const type = classifyJobId(params.job_id)
 

@@ -6,7 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
-import { STATUS_LABELS, requireWorkspace, requireProject, specNotFoundError } from "../shared"
+import { STATUS_LABELS, requireWorkspace, requireProject, specNotFoundError, requireAuth } from "../shared"
 
 const DESCRIPTION = `Manage interactive notebook environments on the SII 启智平台.
 
@@ -42,6 +42,9 @@ export const inspireNotebook = tool({
     memory_size: z.number().optional().describe("Memory in GB"),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     if (params.action === "list") return handleList(params)
     if (params.action === "detail") return handleDetail(params)
     if (params.action === "start") return handleOperate(params, "START")
@@ -52,9 +55,6 @@ export const inspireNotebook = tool({
 })
 
 async function handleList(params: any) {
-  const creds = await InspireAuth.getInspireCredentials()
-  if (!creds) return InspireAuth.notAuthenticatedError("inspire")
-
   const wsResult = await requireWorkspace(params.workspace)
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
@@ -119,9 +119,6 @@ async function handleList(params: any) {
 }
 
 async function handleDetail(params: any) {
-  const creds = await InspireAuth.getInspireCredentials()
-  if (!creds) return InspireAuth.notAuthenticatedError("inspire")
-
   if (!params.notebook_id) {
     return {
       title: "缺少笔记本 ID",
@@ -194,9 +191,6 @@ async function handleDetail(params: any) {
 }
 
 async function handleOperate(params: any, operation: "START" | "STOP") {
-  const creds = await InspireAuth.getInspireCredentials()
-  if (!creds) return InspireAuth.notAuthenticatedError("inspire")
-
   if (!params.notebook_id) {
     return {
       title: "缺少笔记本 ID",

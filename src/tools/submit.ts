@@ -6,7 +6,7 @@ import { InspireAuth } from "../auth"
 import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireTypes } from "../types"
-import { specNotFoundError, specInvalidError } from "../shared"
+import { specNotFoundError, specInvalidError, requireAuth } from "../shared"
 
 const DESCRIPTION = `Submit a GPU training task on the SII 启智平台.
 
@@ -63,6 +63,9 @@ export const inspireSubmit = tool({
       .describe("Enable auto fault tolerance (auto-restart on failure). Default: false"),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     const sii = await pluginConfig().get()
     const warnings: string[] = []
     const defaults: string[] = []

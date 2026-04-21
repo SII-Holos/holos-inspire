@@ -6,7 +6,7 @@ import { InspireNormalize } from "../normalize"
 import { InspireResolve } from "../resolve"
 import { InspireCache } from "../cache"
 import { InspireTypes } from "../types"
-import { STATUS_LABELS, requireWorkspace } from "../shared"
+import { STATUS_LABELS, requireWorkspace, requireAuth } from "../shared"
 
 const DESCRIPTION = `List training and HPC tasks on the SII 启智平台 with status filtering and pagination.
 
@@ -34,6 +34,9 @@ export const inspireJobs = tool({
     offset: z.number().optional().describe("Pagination offset (default 0)"),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     const statusFilter = params.status ?? "all"
     const typeFilter = params.type ?? "all"
     const limit = params.limit ?? 20

@@ -6,7 +6,7 @@ import { InspireCache } from "../cache"
 import { InspireResolve } from "../resolve"
 import { InspireNormalize } from "../normalize"
 import { InspireTypes } from "../types"
-import { listAvailableSpecs } from "../shared"
+import { listAvailableSpecs, requireAuth } from "../shared"
 
 const DESCRIPTION = `Query SII 启智平台 project, workspace, GPU resource, and constraint information. Returns the full decision context in one call: which projects you belong to, which workspaces are available, GPU availability per compute group, available specs, max priority, remaining budget, and storage paths.
 
@@ -45,15 +45,11 @@ export const inspireStatus = tool({
     refresh: z.boolean().optional().describe("Force refresh cached data (default false)"),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     let projects: any[]
-    try {
-      projects = await InspireCache.getProjects(params.refresh)
-    } catch (err: any) {
-      if (String(err).includes("inspire_not_authenticated")) {
-        return InspireAuth.notAuthenticatedError("inspire")
-      }
-      throw err
-    }
+    projects = await InspireCache.getProjects(params.refresh)
 
     if (params.project) {
       const match = await InspireResolve.project(params.project)

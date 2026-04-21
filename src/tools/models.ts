@@ -5,7 +5,7 @@ import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
 import { InspireNormalize } from "../normalize"
 import { InspireResolve } from "../resolve"
-import { requireWorkspace, requireProject } from "../shared"
+import { requireWorkspace, requireProject, requireAuth } from "../shared"
 
 const DESCRIPTION = `Search and browse models in the SII 启智平台 model repository.
 
@@ -42,8 +42,8 @@ export const inspireModels = tool({
     tags: z.array(z.string()).optional().describe("Custom tags"),
   },
   async execute(params, ctx) {
-    const creds = await InspireAuth.getInspireCredentials()
-    if (!creds) return InspireAuth.notAuthenticatedError("inspire")
+    const authErr = await requireAuth()
+    if (authErr) return authErr
 
     if (params.action === "list") return handleList(params)
     if (params.action === "detail") return handleDetail(params)

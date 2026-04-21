@@ -4,7 +4,7 @@ import { InspireHarbor } from "../harbor"
 import { InspireAuth } from "../auth"
 import { InspireTypes } from "../types"
 import { InspireAPI } from "../api"
-import { requireWorkspace } from "../shared"
+import { requireWorkspace, requireAuth } from "../shared"
 
 const DESCRIPTION = `Search and browse Docker images available on the SII 启智平台.
 
@@ -58,8 +58,8 @@ async function executePlatform(params: {
   limit?: number
   offset?: number
 }) {
-  const creds = await InspireAuth.getInspireCredentials()
-  if (!creds) return InspireAuth.notAuthenticatedError("inspire")
+  const authErr = await requireAuth()
+  if (authErr) return authErr
 
   const wsResult = await requireWorkspace(params.workspace)
   if (!("ws" in wsResult)) return wsResult

@@ -4,6 +4,12 @@ import { InspireTypes } from "./types"
 import { InspireAuth } from "./auth"
 import { pluginConfig } from "./ctx"
 
+export async function requireAuth(): Promise<InspireTypes.ToolResult | null> {
+  const creds = await InspireAuth.getInspireCredentials()
+  if (!creds) return InspireAuth.notAuthenticatedError("inspire")
+  return null
+}
+
 export const STATUS_LABELS: Record<string, string> = {
   running: "运行中",
   waiting: "排队中",

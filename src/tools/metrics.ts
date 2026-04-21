@@ -3,6 +3,7 @@ import { tool } from "@ericsanchezok/synergy-plugin"
 import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
 import { InspireNormalize } from "../normalize"
+import { requireAuth } from "../shared"
 
 type MetricType = InspireAPI.MetricType
 type MetricTimeSeries = InspireAPI.MetricTimeSeries
@@ -529,8 +530,8 @@ export const inspireMetrics = tool({
       .describe("Local file path for download mode (default: /tmp/{job_id}-metrics.json)"),
   },
   async execute(params, ctx) {
-    const creds = await InspireAuth.getInspireCredentials()
-    if (!creds) return InspireAuth.notAuthenticatedError("inspire")
+    const authErr = await requireAuth()
+    if (authErr) return authErr
 
     if (!params.job_id.startsWith("job-")) {
       return {

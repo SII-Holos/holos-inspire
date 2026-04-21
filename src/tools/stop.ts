@@ -4,7 +4,7 @@ import { InspireAPI } from "../api"
 import { InspireAuth } from "../auth"
 import { InspireNormalize } from "../normalize"
 import { InspireResolve } from "../resolve"
-import { classifyJobId, requireWorkspace } from "../shared"
+import { classifyJobId, requireWorkspace, requireAuth } from "../shared"
 
 const DESCRIPTION = `Stop running tasks on the SII 启智平台. Supports stopping a single task by ID or batch-stopping all tasks matching a status filter in a workspace.
 
@@ -35,6 +35,9 @@ export const inspireStop = tool({
       ),
   },
   async execute(params, ctx) {
+    const authErr = await requireAuth()
+    if (authErr) return authErr
+
     if (!params.job_id && !params.workspace) {
       return {
         title: "参数错误",

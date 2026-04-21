@@ -13,10 +13,9 @@ export namespace InspireAuth {
         output: [
           "启智平台账号未配置。",
           "",
-          "请运行以下命令登录：",
-          "  synergy sii inspire login",
-          "",
-          "或提供学工号和密码，我可以通过 bash 帮你执行登录命令。",
+          "请通过以下方式登录：",
+          "  1. CLI: synergy inspire login",
+          "  2. 或直接提供学工号和密码，agent 可以帮你执行登录",
         ].join("\n"),
         metadata: { error: "inspire_not_authenticated" },
       }
@@ -26,11 +25,13 @@ export namespace InspireAuth {
       output: [
         "Harbor 镜像仓库账号未配置。",
         "",
-        "请运行以下命令登录：",
-        "  synergy sii harbor login",
+        "请通过以下方式登录：",
+        "  1. CLI: synergy inspire harbor-login (七宝, 默认)",
+        "  2. CLI: synergy inspire harbor-login --registry sj (松江)",
         "",
         "Harbor 的用户名和密码可在启智平台「镜像管理 → 本地推送」页面查看。",
         "首次打开该页面时会显示用户名和密码，请妥善保存。",
+        "注意：七宝和松江的密码不同，需要分别配置。",
       ].join("\n"),
       metadata: { error: "harbor_not_authenticated" },
     }
@@ -194,7 +195,7 @@ export namespace InspireAuth {
         }
       }
       if (msg.includes("inspire_not_authenticated")) {
-        throw new TokenUnavailableError("启智平台账号未配置。请运行 synergy sii inspire login。", "not_authenticated")
+        throw new TokenUnavailableError("启智平台账号未配置。请运行 synergy inspire login。", "not_authenticated")
       }
       throw new TokenUnavailableError(`认证失败: ${err?.message ?? err}`, "unknown")
     }
