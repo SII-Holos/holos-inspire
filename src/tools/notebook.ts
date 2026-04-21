@@ -310,7 +310,9 @@ async function handleCreate(params: any) {
   if (matchedSpec) {
     body.resource_spec_price = {
       quota_id: specId,
+      cpu_type: "",
       cpu_count: matchedSpec.cpu_count,
+      gpu_type: (matchedSpec.gpu_info as any)?.gpu_type ?? "",
       gpu_count: matchedSpec.gpu_count,
       memory_size_gib: matchedSpec.memory_size_gib,
     }
@@ -318,7 +320,11 @@ async function handleCreate(params: any) {
     body.gpu_count = matchedSpec.gpu_count
     body.memory_size = matchedSpec.memory_size_gib
   } else {
-    body.resource_spec_price = { quota_id: specId }
+    body.resource_spec_price = {
+      quota_id: specId,
+      cpu_type: "",
+      gpu_type: "",
+    }
   }
 
   if (params.command) body.command = params.command
