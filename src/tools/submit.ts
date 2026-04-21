@@ -23,7 +23,7 @@ IMPORTANT constraints:
 - Images must match the target registry. 七宝 spaces use docker-qb.sii.edu.cn, 松江 spaces use docker.sii.shaipower.online. Mismatched registry causes image pull failure.
 - For internet-enabled workspaces, use HF mirror for faster downloads: export HF_ENDPOINT=https://hf-mirror.com
 
-Requires OpenAPI access. If your account has not enabled OpenAPI, this tool will return an error — contact the platform administrator to enable it.
+Requires platform API access. If your account has not been granted API access, this tool will return an error — contact the platform administrator to enable it.
 
 Call inspire_status first to discover resources. Use inspire_config to set defaults for repeated use.`
 
@@ -189,26 +189,26 @@ export const inspireSubmit = tool({
         }
         if (err.reason === "openapi_not_enabled") {
           return {
-            title: "OpenAPI 权限未开通",
+            title: "API 权限未开通",
             output: [
-              "当前账号未开通 OpenAPI 权限，无法提交任务。",
+              "当前账号未开通 API 权限，无法提交任务。",
               "",
-              "启智平台的任务操作必须通过 OpenAPI 进行。请联系平台管理员开通 OpenAPI 权限。",
+              "请联系平台管理员开通 API 权限。",
               "",
-              "验证方式: 在启智平台「个人中心 → OpenAPI」页面查看是否有 Token 管理入口。",
+              "验证方式: 在启智平台「个人中心 → API 管理」页面查看是否有相关管理入口。",
             ].join("\n"),
             metadata: { error: "openapi_not_enabled" } as Record<string, any>,
           }
         }
         return {
           title: "提交失败",
-          output: `OpenAPI 认证失败: ${err.message}`,
+          output: `平台 API 认证失败: ${err.message}`,
           metadata: { error: "token_unavailable", reason: err.reason } as Record<string, any>,
         }
       }
       return {
         title: "认证失败",
-        output: `无法获取 OpenAPI Token: ${err.message ?? err}`,
+        output: `平台认证失败: ${err.message ?? err}`,
         metadata: { error: "token_error" } as Record<string, any>,
       }
     }
@@ -219,7 +219,7 @@ export const inspireSubmit = tool({
         output: [
           "未指定 spec_id 且无法自动解析。",
           "",
-          "OpenAPI 提交任务必须提供 spec_id（即 quota_id）。获取方式：",
+          "提交任务必须提供 spec_id（即 quota_id）。获取方式：",
           "1. 调用 inspire_job_detail 查看已有任务的「规格 ID (quota_id)」",
           '2. 用 inspire_config(action="set", key="defaultSpecId", value="...") 设置默认值',
           "3. 在 inspire_submit 的 spec 参数中直接指定",

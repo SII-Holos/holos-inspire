@@ -140,8 +140,6 @@ async function handleGpuDetail(jobId: string) {
     `任务页面: ${url}`,
   )
 
-  if (usedOpenAPI) lines.push("查询方式: OpenAPI")
-
   if (statusInfo.family === "failed") {
     lines.push("", "⚠ 诊断建议:")
 
@@ -287,7 +285,7 @@ async function handleHpcDetail(jobId: string) {
   } catch {
     return {
       title: "查询失败",
-      output: `无法获取 HPC 任务 ${jobId} 的详情。请确认任务 ID 正确且 OpenAPI 权限已开通。`,
+      output: `无法获取 HPC 任务 ${jobId} 的详情。请确认任务 ID 正确且 API 权限已开通。`,
       metadata: { error: "hpc_detail_failed", job_id: jobId } as Record<string, any>,
     }
   }
@@ -328,8 +326,6 @@ async function handleHpcDetail(jobId: string) {
     "",
     `任务页面: ${url}`,
   )
-
-  if (usedOpenAPI) lines.push("查询方式: OpenAPI")
 
   return {
     title: `${job.name} (${statusInfo.family})`,

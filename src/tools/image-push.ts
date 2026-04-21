@@ -6,12 +6,10 @@ import { InspireTypes } from "../types"
 
 const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry (${InspireTypes.HARBOR_REGISTRY}/${InspireTypes.HARBOR_PROJECT}/).
 
-Internally runs docker login → docker tag → docker push.
-
 Prerequisites:
 - Docker must be installed and running locally
 - Add insecure registry to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
-- Harbor credentials configured (synergy sii harbor login). Harbor password is separate from platform password — find it on the platform under 镜像管理 → 本地推送
+- Harbor credentials configured (synergy inspire harbor-login). Harbor password is separate from platform password — find it on the platform under 镜像管理 → 本地推送
 - Must be on VPN or campus network
 
 After pushing:

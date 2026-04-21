@@ -8,8 +8,6 @@ import { InspireResolve } from "../resolve"
 
 const DESCRIPTION = `Submit an HPC/CPU task on the SII 启智平台 (Slurm scheduling). Use for data preprocessing, evaluation, CPU-intensive computation, or auxiliary tasks.
 
-Requires OpenAPI access. If unavailable, falls back to internal API.
-
 HPC spaces (高性能计算) have NO internet. All dependencies must be pre-installed in the image.
 HPC tasks must use Slurm-compatible images (images with 'slurm' in the name).
 Non-interactive shell: manually source conda in the entrypoint if needed.
@@ -215,7 +213,7 @@ export const inspireSubmitHpc = tool({
             },
           }),
         )
-        warnings.push("⚠ OpenAPI 不可用，已回退到 Cookie API")
+        warnings.push("⚠ 使用了备用认证方式提交")
       } catch (cookieErr: any) {
         if (String(cookieErr).includes("inspire_not_authenticated")) {
           return InspireAuth.notAuthenticatedError("inspire")
@@ -251,8 +249,6 @@ export const inspireSubmitHpc = tool({
       "",
       `存储路径: ${storagePath}`,
     ]
-
-    if (usedOpenAPI) lines.push(`提交方式: OpenAPI`)
 
     if (defaults.length > 0) {
       lines.push("", "📋 使用的默认配置:")

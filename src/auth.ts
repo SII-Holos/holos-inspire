@@ -155,7 +155,7 @@ export namespace InspireAuth {
     if (err?.status === 401) return true
     if (err?.code === -1) return true
     const msg = String(err?.message ?? err ?? "").toLowerCase()
-    return msg.includes("401") || msg.includes("unauthorized") || msg.includes("cookie") || msg.includes("token")
+    return msg.includes("401") || msg.includes("unauthorized") || msg.includes("session expired") || msg.includes("authentication expired")
   }
 
   export class TokenUnavailableError extends Error {
@@ -177,18 +177,18 @@ export namespace InspireAuth {
         try {
           await requireCookie()
           throw new TokenUnavailableError(
-            "OpenAPI Token 认证失败，但 CAS 登录正常。可能该账号未开通 OpenAPI 权限，将回退到 Cookie API。",
+            "API 认证失败，但平台登录正常。可能该账号未开通 API 权限，将尝试其他认证方式。",
             "openapi_not_enabled",
           )
         } catch (cookieErr: any) {
           if (cookieErr instanceof TokenUnavailableError) throw cookieErr
-          throw new TokenUnavailableError("用户名或密码错误，CAS 登录也失败。请检查凭据。", "credentials_invalid")
+          throw new TokenUnavailableError("用户名或密码错误，平台登录失败。请检查凭据。", "credentials_invalid")
         }
       }
       if (msg.includes("inspire_not_authenticated")) {
         throw new TokenUnavailableError("启智平台账号未配置。请运行 synergy sii inspire login。", "not_authenticated")
       }
-      throw new TokenUnavailableError(`Token 获取失败: ${err?.message ?? err}`, "unknown")
+      throw new TokenUnavailableError(`认证失败: ${err?.message ?? err}`, "unknown")
     }
   }
 
@@ -364,7 +364,7 @@ export namespace InspireAuth {
 
     const cookieStr = session.getCookieString("qz.sii.edu.cn")
     if (!cookieStr.includes("session")) {
-      throw new Error("登录成功但未获取到 session cookie")
+      throw new Error("登录成功但未建立会话，请重试或检查网络环境")
     }
 
     return cookieStr

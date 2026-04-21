@@ -61,10 +61,10 @@ export const InspirePlugin: Plugin = {
 
       cli: {
         login: {
-          description: "Login to Inspire platform (CAS credentials)",
+          description: "Login to Inspire platform",
           options: {
             username: { type: "string", description: "学工号" },
-            password: { type: "string", description: "CAS 密码" },
+            password: { type: "string", description: "密码" },
           },
           async execute(args) {
             const { InspireAuth } = await import("./auth")

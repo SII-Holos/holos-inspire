@@ -149,14 +149,14 @@ async function handleCreate(params: any) {
     if (err instanceof InspireAuth.TokenUnavailableError) {
       if (err.reason === "not_authenticated") return InspireAuth.notAuthenticatedError("inspire")
       return {
-        title: "OpenAPI 不可用",
-        output: `推理服务创建需要 OpenAPI 权限: ${err.message}`,
+        title: "API 权限不可用",
+        output: `推理服务创建需要 API 权限: ${err.message}`,
         metadata: { error: "token_unavailable" },
       }
     }
     return {
       title: "认证失败",
-      output: `无法获取 Token: ${err.message ?? err}`,
+      output: `平台认证失败: ${err.message ?? err}`,
       metadata: { error: "token_error" },
     }
   }
@@ -244,7 +244,7 @@ async function handleDetail(params: any) {
     }
     return {
       title: "认证失败",
-      output: `无法获取 Token: ${err.message ?? err}`,
+      output: `平台认证失败: ${err.message ?? err}`,
       metadata: { error: "token_error" },
     }
   }
@@ -325,13 +325,13 @@ async function handleStop(params: any) {
       if (err.reason === "not_authenticated") return InspireAuth.notAuthenticatedError("inspire")
       return {
         title: "停止失败",
-        output: `OpenAPI 认证失败: ${err.message}`,
+        output: `平台 API 认证失败: ${err.message}`,
         metadata: { error: "token_unavailable" },
       }
     }
     return {
       title: "认证失败",
-      output: `无法获取 Token: ${err.message ?? err}`,
+      output: `平台认证失败: ${err.message ?? err}`,
       metadata: { error: "token_error" },
     }
   }

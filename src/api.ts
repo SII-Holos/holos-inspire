@@ -21,7 +21,7 @@ export namespace InspireAPI {
       body: JSON.stringify(body),
     })
     if (resp.status === 401 || resp.status === 302 || resp.status === 403) {
-      throw Object.assign(new Error("Token expired or invalid"), { code: -1, status: resp.status })
+      throw Object.assign(new Error("Authentication expired or invalid"), { code: -1, status: resp.status })
     }
     const text = await resp.text()
     let data: any
@@ -30,7 +30,7 @@ export namespace InspireAPI {
     } catch {
       throw Object.assign(new Error(`API returned non-JSON response (HTTP ${resp.status})`), { status: resp.status })
     }
-    if (data.code === -1) throw Object.assign(new Error("Token expired"), { code: -1 })
+    if (data.code === -1) throw Object.assign(new Error("Authentication expired"), { code: -1 })
     if (data.code !== 0) throw new Error(data.message ?? `API error code ${data.code}`)
     return data.data ?? data
   }
@@ -46,7 +46,7 @@ export namespace InspireAPI {
       headers: cookieHeaders(cookie, workspaceId),
       body: JSON.stringify(body),
     })
-    if (resp.status === 401) throw Object.assign(new Error("Cookie expired"), { status: 401 })
+    if (resp.status === 401) throw Object.assign(new Error("Session expired"), { status: 401 })
     if (!resp.ok) {
       let detail = ""
       try {
@@ -445,7 +445,7 @@ export namespace InspireAPI {
     const resp = await fetch(`${InspireTypes.PLATFORM_URL}/api/v1/notebook/${notebookId}`, {
       headers: cookieHeaders(cookie),
     })
-    if (resp.status === 401) throw Object.assign(new Error("Cookie expired"), { status: 401 })
+    if (resp.status === 401) throw Object.assign(new Error("Session expired"), { status: 401 })
     const data = (await resp.json()) as any
     if (data.code !== 0) throw new Error(data.message ?? `API error code ${data.code}`)
     return data.data
