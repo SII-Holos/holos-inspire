@@ -288,8 +288,8 @@ async function handleCreate(params: any) {
     project_id: proj.id,
     name: params.name,
     logic_compute_group_id: cg.id,
-    quota_id: specId,
-    image,
+    resource_spec_price: { quota_id: specId },
+    mirror_url: image,
     task_priority: priority,
   }
 

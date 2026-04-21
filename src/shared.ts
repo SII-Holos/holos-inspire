@@ -108,10 +108,7 @@ export async function specNotFoundError(
         "",
         ...formatSpecTable(specs),
         "",
-        "请根据任务需求选择：",
-        "- 多机训练建议选整节点（如 8 GPU）避免资源碎片化",
-        "- 单卡调试可选最小规格",
-        "- 选定后用 spec 参数传入",
+        "请根据任务需求选择合适的规格，选定后用 spec 参数传入。",
       ].join("\n"),
       metadata: { error: "spec_id_required", available_specs: specs },
     }
