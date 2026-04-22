@@ -141,10 +141,29 @@ export const inspireStatus = tool({
               lines.push(`        - ${g.name} (${g.id}): ${gpuInfo}`)
 
               try {
-                const specs = await listAvailableSpecs(space.id, g.id)
-                if (specs.length > 0) {
-                  lines.push("          可用规格:")
-                  for (const s of specs) {
+                const trainSpecs = await listAvailableSpecs(space.id, g.id, "SCHEDULE_CONFIG_TYPE_TRAIN")
+                const dswSpecs = await listAvailableSpecs(space.id, g.id, "SCHEDULE_CONFIG_TYPE_DSW")
+                const servingSpecs = await listAvailableSpecs(space.id, g.id, "SCHEDULE_CONFIG_TYPE_SERVING")
+
+                const hasTrain = trainSpecs.length > 0
+                const hasDsw = dswSpecs.length > 0
+                const hasServing = servingSpecs.length > 0
+
+                if (hasTrain) {
+                  lines.push("          训练规格:")
+                  for (const s of trainSpecs) {
+                    lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
+                  }
+                }
+                if (hasDsw) {
+                  lines.push("          Notebook 规格:")
+                  for (const s of dswSpecs) {
+                    lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
+                  }
+                }
+                if (hasServing) {
+                  lines.push("          推理服务规格:")
+                  for (const s of servingSpecs) {
                     lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
                   }
                 }

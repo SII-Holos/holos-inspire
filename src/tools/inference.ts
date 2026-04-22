@@ -116,7 +116,7 @@ async function handleCreate(params: any) {
 
   const specId = params.spec
   if (!specId) {
-    return specNotFoundError(ws.id, cg.id, cg.name)
+    return specNotFoundError(ws.id, cg.id, cg.name, "SCHEDULE_CONFIG_TYPE_SERVING")
   }
 
   const projects = await InspireCache.getProjects()
