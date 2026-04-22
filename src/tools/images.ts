@@ -21,7 +21,7 @@ Two registries with separate credentials:
 - 七宝 (main): push to ${InspireTypes.HARBOR_REGISTRY}, display as docker.sii.shaipower.online (all spaces except SJ)
 - 松江 (SJ): push to docker-t.sii.edu.cn, display as docker-t.sii.shaipower.online (SJ资源空间 only)
 
-Submit tasks using the display domain, not the push domain. Images must be registered on the platform after push (镜像管理 → 新建镜像).`
+Submit tasks using the display domain, not the push domain. Images must be registered on the platform after push (镜像管理 → 新建镜像, fill in 镜像名称 and 版本号).`
 
 export const inspireImages = tool({
   description: DESCRIPTION,
@@ -153,9 +153,12 @@ async function executeHarbor(params: {
       const artifacts = await InspireHarbor.listArtifacts(repoName, { limit: params.limit ?? 20 })
 
       const fullName = `${InspireTypes.HARBOR_PROJECT}/${repoName}`
+      const pushAddress = `${InspireTypes.HARBOR_REGISTRY}/${fullName}`
+      const displayAddress = `docker.sii.shaipower.online/${fullName}`
       const lines = [
         `=== 镜像详情: ${fullName} ===`,
-        `完整地址: ${InspireTypes.HARBOR_REGISTRY}/${fullName}`,
+        `推送地址: ${pushAddress}`,
+        `使用地址: ${displayAddress}`,
         "",
         "版本列表:",
       ]
@@ -164,15 +167,15 @@ async function executeHarbor(params: {
         lines.push("  (无版本)")
       } else {
         for (const a of artifacts) {
-          const tags = a.tags.length ? a.tags.join(", ") : "(无 tag)"
-          lines.push(`  Tag: ${tags.padEnd(16)} 大小: ${a.size_gb} GB   推送于: ${a.push_time.split("T")[0]}`)
+          const tags = a.tags.length ? a.tags.join(", ") : "(无版本号)"
+          lines.push(`  版本号: ${tags.padEnd(16)} 大小: ${a.size_gb} GB   推送于: ${a.push_time.split("T")[0]}`)
         }
       }
 
       lines.push(
         "",
-        "使用方式:",
-        `  在 inspire_submit 的 image 参数中使用: ${InspireTypes.HARBOR_REGISTRY}/${fullName}:{tag}`,
+        "提示：推送后需在平台「镜像管理 → 新建镜像」中注册（填写镜像名称和版本号），才能用于提交任务。",
+        `注册后在 inspire_submit 中使用: inspire_submit(image="${displayAddress}:{版本号}", ...)`,
       )
 
       return {
@@ -191,7 +194,7 @@ async function executeHarbor(params: {
 
     const lines = [
       header,
-      `共 ${result.total} 个仓库（显示 ${offset + 1}-${offset + result.repositories.length}）:`,
+      `共 ${result.total} 个镜像（显示 ${offset + 1}-${offset + result.repositories.length}）:`,
       "",
     ]
 
@@ -210,7 +213,7 @@ async function executeHarbor(params: {
       lines.push("")
     }
 
-    lines.push('使用 repo 参数查看某个镜像的所有版本: inspire_images(source="harbor", repo="{name}")')
+    lines.push('使用 repo 参数查看某个镜像的所有版本: inspire_images(source="harbor", repo="{镜像名称}")')
 
     return {
       title: `${result.repositories.length} 个镜像`,

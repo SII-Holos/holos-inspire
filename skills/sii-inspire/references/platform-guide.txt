@@ -31,11 +31,19 @@ Two independent registry systems (images NOT shared between them):
 - Display domain: `docker-t.sii.shaipower.online`
 
 **Push workflow:**
+1. Use `inspire_image_push(image="local-image:tag", name="镜像名称", tag="版本号")` to push to Harbor
+   - `name` must NOT include project prefix (use 'faro-postgres', NOT 'inspire-studio/faro-postgres')
+   - Tool auto-prepends `inspire-studio/` and handles docker login/tag/push
+2. **MUST register** on platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save
+3. Use display domain address in task submission: `docker.sii.shaipower.online/inspire-studio/<镜像名称>:<版本号>`
+
+Without registration, the image exists in Harbor but CANNOT be used for tasks, notebooks, or inference services.
+
+**Manual push (if tool unavailable):**
 1. `docker login docker-qb.sii.edu.cn` (credentials from 镜像管理 → 本地推送)
 2. `docker tag <local> docker-qb.sii.edu.cn/inspire-studio/<镜像名称>:<版本号>`
 3. `docker push docker-qb.sii.edu.cn/inspire-studio/<镜像名称>:<版本号>`
-4. **MUST register** on platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save
-5. Use display domain address in task submission: `docker.sii.shaipower.online/inspire-studio/<镜像名称>:<版本号>`
+4. Register on platform (same as step 2 above)
 
 Without registration, the image exists in Harbor but CANNOT be used for tasks, notebooks, or inference services.
 

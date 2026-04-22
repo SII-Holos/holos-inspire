@@ -126,7 +126,7 @@ export namespace InspireHarbor {
     remoteName: string
     remoteTag: string
     target?: InspireTypes.HarborTarget
-  }): Promise<{ fullPath: string; digest?: string }> {
+  }): Promise<{ fullPath: string; digest?: string; warnedDuplicatePath?: boolean }> {
     const target = opts.target ?? "qb"
     const creds = await InspireAuth.getHarborCredentials(target)
     if (!creds) {
@@ -134,8 +134,17 @@ export namespace InspireHarbor {
       throw new Error(`harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --registry ${target}`)
     }
 
+    // Strip project prefix if user accidentally included it (e.g. "inspire-studio/faro-postgres" → "faro-postgres")
+    let remoteName = opts.remoteName
+    let warnedDuplicatePath = false
+    const projectPrefix = `${PROJECT}/`
+    if (remoteName.startsWith(projectPrefix)) {
+      remoteName = remoteName.slice(projectPrefix.length)
+      warnedDuplicatePath = true
+    }
+
     const registry = InspireTypes.harborRegistry(target)
-    const fullPath = `${registry}/${PROJECT}/${opts.remoteName}:${opts.remoteTag}`
+    const fullPath = `${registry}/${PROJECT}/${remoteName}:${opts.remoteTag}`
 
     const hasDocker = await checkDocker()
     if (!hasDocker) throw new Error("docker is not installed or not in PATH")
@@ -162,7 +171,7 @@ export namespace InspireHarbor {
     const digestMatch = pushOutput.match(/digest:\s*(sha256:[a-f0-9]+)/i)
     if (digestMatch) digest = digestMatch[1]
 
-    return { fullPath, digest }
+    return { fullPath, digest, warnedDuplicatePath }
   }
 
   async function exec(cmd: string[]): Promise<string> {

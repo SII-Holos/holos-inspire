@@ -55,6 +55,12 @@ Diagnosis steps:
 2. Using push domain instead of display domain → use docker.sii.shaipower.online/... (not docker-qb.sii.edu.cn/...)
 3. Image registered in wrong registry → SJ space needs docker-t.sii.shaipower.online, all other spaces need docker.sii.shaipower.online
 
+### Image push fails with "Unavailable" or "unknown error"
+- Most likely cause: Robot account lacks push permission for the target repository
+- Less likely: Harbor service temporarily down or network issues
+- Harbor supports auto-creating repositories on push — pre-creation is NOT needed
+- Temporary workaround: `docker save` to .tar file, upload via platform UI
+
 ### Image push succeeds but not visible on platform
 Push to Harbor is not enough. Must register: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save.
 

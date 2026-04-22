@@ -75,10 +75,12 @@ Note: notebook specs differ from training specs. Omit `spec` to see available no
 ```
 inspire_images(search="torch")                                → find existing registered images
 inspire_images(source="harbor", search="torch")               → search raw Harbor registry
-inspire_image_push(image="my-train:v1", name="my-train", tag="v1")  → push to Harbor
+inspire_image_push(image="my-train:v1")                       → push to Harbor (name defaults to image name)
 ```
 
-After push, you MUST register the image on the platform: 镜像管理 → 新建镜像 → fill 镜像名称 + 版本号 → save. Without registration, the image cannot be used for tasks or notebooks.
+After push, you MUST register the image on the platform: 镜像管理 → 新建镜像 → fill 镜像名称 (same as name param, e.g. 'my-train') + 版本号 (same as tag, e.g. 'v1') → save. Without registration, the image cannot be used for tasks or notebooks.
+
+Note: `name` parameter should NOT include project prefix (use 'faro-postgres', NOT 'inspire-studio/faro-postgres'). The tool auto-prepends `inspire-studio/`.
 
 ### Download data for offline training
 
@@ -107,8 +109,9 @@ To read results: `inspire_logs(job_id="job-xxx")` or submit a lightweight CPU jo
 
 ### Images & Registries
 - **Two registries**: main (docker-qb.sii.edu.cn → docker.sii.shaipower.online) for all spaces except SJ; SJ-only (docker-t.sii.edu.cn → docker-t.sii.shaipower.online)
-- **Push ≠ usable**: after docker push, must register on platform via 镜像管理
+- **Push ≠ usable**: after docker push, must register on platform via 镜像管理 → 新建镜像 (fill 镜像名称 + 版本号)
 - **Submit uses display domain**: always use docker.sii.shaipower.online/... (not docker-qb.sii.edu.cn/...)
+- **Harbor auto-creates repos**: no need to pre-create the repository, push will create it automatically
 - **Harbor credentials**: 七宝 and 松江 have different passwords
 
 ### Resource Specs
