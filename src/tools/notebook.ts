@@ -61,8 +61,8 @@ async function handleList(params: any) {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const { items, total } = await InspireAuth.withTokenRetry((t) =>
-    InspireAPI.listNotebooks(t, ws.id, {
+  const { items, total } = await InspireAuth.withCookieRetry((cookie) =>
+    InspireAPI.listNotebooks(cookie, ws.id, {
       page: Math.floor((params.offset ?? 0) / (params.limit ?? 20)) + 1,
       pageSize: Math.min(params.limit ?? 20, 100),
     }),
@@ -131,6 +131,7 @@ async function handleDetail(params: any) {
 
   let nb: any
   try {
+    const token = await InspireAuth.ensureToken()
     nb = await InspireAuth.withTokenRetry((t) => InspireAPI.getNotebookDetail(t, params.notebook_id!))
   } catch (err: any) {
     return {
@@ -204,6 +205,7 @@ async function handleOperate(params: any, operation: "START" | "STOP") {
   const opLabel = operation === "START" ? "启动" : "停止"
 
   try {
+    const token = await InspireAuth.ensureToken()
     await InspireAuth.withTokenRetry((t) => InspireAPI.operateNotebook(t, params.notebook_id!, operation))
     return {
       title: `已${opLabel} ${params.notebook_id}`,
@@ -290,9 +292,9 @@ async function handleCreate(params: any) {
     }
   }
 
-  let token: string
+  let cookie: string
   try {
-    token = await InspireAuth.ensureToken()
+    cookie = await InspireAuth.requireCookie()
   } catch {
     return InspireAuth.notAuthenticatedError("inspire")
   }
@@ -339,7 +341,7 @@ async function handleCreate(params: any) {
 
   let result: any
   try {
-    result = await InspireAPI.createNotebook(token, body)
+    result = await InspireAPI.createNotebook(cookie, body)
   } catch (err: any) {
     return {
       title: "创建失败",

@@ -284,14 +284,15 @@ async function handleHpcDetail(jobId: string) {
   const createdAt = InspireNormalize.formatTimestamp(job.created_at)
   const duration = InspireNormalize.formatDuration(job.running_time_ms)
   const url = InspireAPI.buildJobUrl(jobId, job.workspace_id, "hpc")
+  const jobName = job.job_name ?? job.name ?? jobId
 
   const lines = [
-    `=== HPC 任务详情: ${job.name} ===`,
+    `=== HPC 任务详情: ${jobName} ===`,
     "",
     "基本信息:",
     `  任务 ID: ${jobId}`,
     `  类型: HPC (Slurm)`,
-    `  状态: ${statusInfo.family} (${statusInfo.raw})`,
+    `  状态: ${statusInfo.family === "unknown" ? statusInfo.raw : statusInfo.family} (${statusInfo.raw})`,
     `  创建于: ${createdAt}`,
     `  运行时长: ${duration || "—"}`,
     "",
@@ -318,7 +319,7 @@ async function handleHpcDetail(jobId: string) {
   )
 
   return {
-    title: `${job.name} (${statusInfo.family})`,
+    title: `${jobName} (${statusInfo.family})`,
     output: lines.join("\n"),
     metadata: {
       job_id: jobId,

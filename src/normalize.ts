@@ -11,9 +11,36 @@ const FAMILY_RULES: Array<{ family: InspireTypes.StatusFamily["family"]; tokens:
   { family: "stopped", tokens: ["stop", "stopped", "cancel", "cancelled", "canceled", "terminate", "terminated"] },
 ]
 
+/** v2 HPC/Inference numeric status codes → human-readable string */
+const V2_STATUS_MAP: Record<number, string> = {
+  1: "creating",
+  2: "scheduling",
+  3: "waiting",
+  4: "running",
+  5: "succeeded",
+  6: "failed",
+  7: "stopped",
+  8: "queued",
+}
+
 export namespace InspireNormalize {
-  export function status(raw: string): InspireTypes.StatusFamily {
-    const lower = raw.toLowerCase().trim()
+  export function status(raw: any): InspireTypes.StatusFamily {
+    // Handle v2 numeric status codes first
+    if (typeof raw === "number") {
+      const label = V2_STATUS_MAP[raw] ?? String(raw)
+      return statusFromToken(label, raw)
+    }
+    // Handle objects that may contain a numeric status field
+    if (raw && typeof raw === "object" && typeof raw.status === "number") {
+      const label = V2_STATUS_MAP[raw.status] ?? String(raw.status)
+      return statusFromToken(label, raw.status)
+    }
+    const str = typeof raw === "string" ? raw : String(raw ?? "")
+    return statusFromToken(str, raw)
+  }
+
+  function statusFromToken(lowerable: string, raw: any): InspireTypes.StatusFamily {
+    const lower = lowerable.toLowerCase().trim()
     for (const rule of FAMILY_RULES) {
       if (rule.tokens.some((t) => lower.includes(t))) {
         const is_terminal = rule.family === "succeeded" || rule.family === "failed" || rule.family === "stopped"
@@ -35,11 +62,14 @@ export namespace InspireNormalize {
     return `${seconds} 秒`
   }
 
-  export function formatTimestamp(ts: string | undefined): string {
+  export function formatTimestamp(ts: string | number | undefined): string {
     if (!ts) return ""
-    const n = parseInt(ts, 10)
-    if (isNaN(n)) return ts
-    return new Date(n)
+    if (typeof ts === "string" && ts.includes("-")) return ts.replace(/T/, " ").replace(/\.\d+Z$/, "").replace(/Z$/, "")
+    const n = typeof ts === "number" ? ts : parseInt(ts, 10)
+    if (isNaN(n)) return String(ts)
+    // Auto-detect seconds vs milliseconds: values < 1e12 are likely seconds
+    const ms = n < 1e12 ? n * 1000 : n
+    return new Date(ms)
       .toISOString()
       .replace("T", " ")
       .replace(/\.\d+Z$/, "")

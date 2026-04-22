@@ -301,21 +301,20 @@ export namespace InspireAPI {
     await postV2("inference_serving", "StopServing", { inference_serving_id: servingId }, token)
   }
 
-  // ── Notebook (v2) ──────────────────────────────────────────────
+  // ── Notebook (v2 for detail/operate, v1 cookie for list/create) ──
 
   export type NotebookOperation = "START" | "STOP"
 
   export async function listNotebooks(
-    token: string,
+    cookie: string,
     workspaceId: string,
     opts?: { page?: number; pageSize?: number },
   ): Promise<{ items: any[]; total: number }> {
-    const body: Record<string, any> = {
+    const data = await postInternal("/api/v1/notebook/list", {
       workspace_id: workspaceId,
       page_size: opts?.pageSize ?? 100,
-      page_num: opts?.page ?? 1,
-    }
-    const data = await postV2("notebook", "ListNotebooks", body, token)
+      page: opts?.page ?? 1,
+    }, cookie, workspaceId)
     return { items: data.list ?? [], total: data.total ?? 0 }
   }
 
@@ -332,8 +331,8 @@ export namespace InspireAPI {
     await postV2("notebook", action, { notebook_id: notebookId }, token)
   }
 
-  export async function createNotebook(token: string, config: Record<string, any>): Promise<any> {
-    return postV2("notebook", "CreateNotebook", config, token)
+  export async function createNotebook(cookie: string, config: Record<string, any>): Promise<any> {
+    return postInternal("/api/v1/notebook/create", config, cookie, config.workspace_id)
   }
 
   // ── Logs & Metrics (v2) ───────────────────────────────────────
