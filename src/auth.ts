@@ -2,40 +2,28 @@ import { InspireCrypto } from "./crypto"
 import { InspireTypes } from "./types"
 import { pluginAuth, pluginCache } from "./ctx"
 
+const KEYCLOAK_BASE = "https://keycloak-inspire-prod.sii.edu.cn"
+const KEYCLOAK_REALM = "inf-internal"
+const KEYCLOAK_ROPC_CLIENT = "admin-cli"
+
+const TOKEN_ENDPOINT = `${KEYCLOAK_BASE}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`
+
+/** Slippage: refresh access_token this many ms before actual expiry */
+const REFRESH_SLIPPAGE_MS = 60_000
+
+interface KeycloakTokenSet {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  refresh_expires_in: number
+  access_expires_at: number
+  refresh_expires_at: number
+}
+
 export namespace InspireAuth {
-  let cachedCookie: { value: string; obtainedAt: number } | undefined
   let cachedToken: string | undefined
 
-  export function notAuthenticatedError(target: "inspire" | "harbor"): InspireTypes.ToolResult {
-    if (target === "inspire") {
-      return {
-        title: "未认证",
-        output: [
-          "启智平台账号未配置。",
-          "",
-          "请通过以下方式登录：",
-          "  1. CLI: synergy inspire login",
-          "  2. 或直接提供学工号和密码，agent 可以帮你执行登录",
-        ].join("\n"),
-        metadata: { error: "inspire_not_authenticated" },
-      }
-    }
-    return {
-      title: "未认证",
-      output: [
-        "Harbor 镜像仓库账号未配置。",
-        "",
-        "请通过以下方式登录：",
-        "  1. CLI: synergy inspire harbor-login (七宝, 默认)",
-        "  2. CLI: synergy inspire harbor-login --registry sj (松江)",
-        "",
-        "Harbor 的用户名和密码可在启智平台「镜像管理 → 本地推送」页面查看。",
-        "首次打开该页面时会显示用户名和密码，请妥善保存。",
-        "注意：七宝和松江的密码不同，需要分别配置。",
-      ].join("\n"),
-      metadata: { error: "harbor_not_authenticated" },
-    }
-  }
+  // ── Credential management ──────────────────────────────────────
 
   export async function getInspireCredentials(): Promise<InspireTypes.InspireAuth | undefined> {
     try {
@@ -77,52 +65,57 @@ export namespace InspireAuth {
     await pluginAuth().set(`harbor${suffix}-password`, password)
   }
 
+  // ── Keycloak token acquisition ─────────────────────────────────
+
   export async function requireToken(): Promise<string> {
     if (cachedToken) return cachedToken
 
+    // Try persisted token set (access + refresh)
     try {
-      const raw = await pluginCache().get("inspire-token")
+      const raw = await pluginCache().get("inspire-keycloak-token")
       if (raw) {
-        const cache: InspireTypes.TokenCache = typeof raw === "string" ? JSON.parse(raw) : raw
-        if (cache.expires_at > Date.now()) {
-          cachedToken = cache.token
-          return cache.token
+        const cache: KeycloakTokenSet = typeof raw === "string" ? JSON.parse(raw) : raw
+
+        // Access token still valid
+        if (cache.access_expires_at > Date.now() + REFRESH_SLIPPAGE_MS) {
+          cachedToken = cache.access_token
+          return cache.access_token
+        }
+
+        // Access expired but refresh still valid → auto-renew
+        if (cache.refresh_token && cache.refresh_expires_at > Date.now() + REFRESH_SLIPPAGE_MS) {
+          try {
+            const refreshed = await refreshTokenGrant(cache.refresh_token)
+            await persistTokenSet(refreshed)
+            cachedToken = refreshed.access_token
+            return refreshed.access_token
+          } catch {
+            // Refresh failed (revoked / network), fall through to full login
+          }
         }
       }
     } catch {}
 
+    // Full ROPC login
     const creds = await getInspireCredentials()
-    if (!creds) throw new Error("inspire_not_authenticated")
+    if (!creds) throw new TokenUnavailableError("inspire_not_authenticated", "not_authenticated")
 
-    const resp = await fetch(`${InspireTypes.PLATFORM_URL}/auth/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: creds.username, password: creds.password }),
-    })
-    const data = (await resp.json()) as any
-    if (data.code !== 0) {
-      const message = data.message ?? "unknown error"
-      console.warn("[inspire.auth] token auth failed", message)
-      throw new Error(message)
-    }
-
-    const tokenData = data.data ?? data
-    const token = tokenData.access_token as string
-    const expiresIn = parseInt(tokenData.expires_in ?? "604800", 10)
-
-    cachedToken = token
-    const ttl = expiresIn * 1000
-    await pluginCache().set("inspire-token", JSON.stringify({ token, expires_at: Date.now() + ttl }), ttl)
-    return token
+    const result = await passwordGrant(creds.username, creds.password)
+    await persistTokenSet(result)
+    cachedToken = result.access_token
+    return result.access_token
   }
 
   export function clearToken(): void {
     cachedToken = undefined
   }
 
+  // ── Cookie auth (fallback for v1-only endpoints) ───────────────
+
+  let cachedCookie: { value: string; obtainedAt: number } | undefined
+
   export async function requireCookie(): Promise<string> {
     if (cachedCookie) return cachedCookie.value
-
     const cookie = await performCasLogin()
     cachedCookie = { value: cookie, obtainedAt: Date.now() }
     return cookie
@@ -132,9 +125,11 @@ export namespace InspireAuth {
     cachedCookie = undefined
   }
 
+  // ── Retry wrappers ─────────────────────────────────────────────
+
   export async function withTokenRetry<T>(fn: (token: string) => Promise<T>): Promise<T> {
-    const token = await requireToken()
     try {
+      const token = await requireToken()
       return await fn(token)
     } catch (err: any) {
       if (isAuthError(err)) {
@@ -160,46 +155,174 @@ export namespace InspireAuth {
     }
   }
 
-  function isAuthError(err: any): boolean {
-    if (err?.status === 401) return true
-    if (err?.code === -1) return true
-    const msg = String(err?.message ?? err ?? "").toLowerCase()
-    return msg.includes("401") || msg.includes("unauthorized") || msg.includes("session expired") || msg.includes("authentication expired")
-  }
+  // ── Error types ────────────────────────────────────────────────
 
   export class TokenUnavailableError extends Error {
     constructor(
       message: string,
-      public readonly reason: "not_authenticated" | "openapi_not_enabled" | "credentials_invalid" | "unknown",
+      public readonly reason: "not_authenticated" | "credentials_invalid" | "refresh_expired" | "unknown",
     ) {
       super(message)
       this.name = "TokenUnavailableError"
     }
   }
 
+  export function notAuthenticatedError(target: "inspire" | "harbor"): InspireTypes.ToolResult {
+    if (target === "inspire") {
+      return {
+        title: "未认证",
+        output: [
+          "启智平台账号未配置。",
+          "",
+          "请通过以下方式登录：",
+          "  1. CLI: synergy inspire login",
+          "  2. 或直接提供学工号和密码，agent 可以帮你执行登录",
+        ].join("\n"),
+        metadata: { error: "inspire_not_authenticated" },
+      }
+    }
+    return {
+      title: "未认证",
+      output: [
+        "Harbor 镜像仓库账号未配置。",
+        "",
+        "请通过以下方式登录：",
+        "  1. CLI: synergy inspire harbor-login (七宝, 默认)",
+        "  2. CLI: synergy inspire harbor-login --registry sj (松江)",
+        "",
+        "Harbor 的用户名和密码可在启智平台「镜像管理 → 本地推送」页面查看。",
+        "首次打开该页面时会显示用户名和密码，请妥善保存。",
+        "注意：七宝和松江的密码不同，需要分别配置。",
+      ].join("\n"),
+      metadata: { error: "harbor_not_authenticated" },
+    }
+  }
+
+  // ── Token with semantic error classification ───────────────────
+
   export async function ensureToken(): Promise<string> {
     try {
       return await requireToken()
     } catch (err: any) {
+      if (err instanceof TokenUnavailableError) throw err
       const msg = String(err?.message ?? err ?? "").toLowerCase()
-      if (msg.includes("invalid_grant") || msg.includes("invalid client") || msg.includes("access denied")) {
-        try {
-          await requireCookie()
-          throw new TokenUnavailableError(
-            "API 认证失败，但平台登录正常。可能该账号未开通 API 权限，将尝试其他认证方式。",
-            "openapi_not_enabled",
-          )
-        } catch (cookieErr: any) {
-          if (cookieErr instanceof TokenUnavailableError) throw cookieErr
-          throw new TokenUnavailableError("用户名或密码错误，平台登录失败。请检查凭据。", "credentials_invalid")
-        }
+      if (msg.includes("invalid_grant") || msg.includes("credentials_invalid")) {
+        throw new TokenUnavailableError("用户名或密码错误，请重新运行 synergy inspire login。", "credentials_invalid")
       }
-      if (msg.includes("inspire_not_authenticated")) {
+      if (msg.includes("inspire_not_authenticated") || msg.includes("not_authenticated")) {
         throw new TokenUnavailableError("启智平台账号未配置。请运行 synergy inspire login。", "not_authenticated")
       }
       throw new TokenUnavailableError(`认证失败: ${err?.message ?? err}`, "unknown")
     }
   }
+
+  // ── Connection tests ───────────────────────────────────────────
+
+  export async function testInspireConnection(): Promise<boolean> {
+    try {
+      await requireToken()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  export async function testHarborConnection(target: InspireTypes.HarborTarget = "qb"): Promise<boolean> {
+    const creds = await getHarborCredentials(target)
+    if (!creds) return false
+    try {
+      const registry = InspireTypes.harborRegistry(target)
+      const resp = await fetch(`https://${registry}/api/v2.0/projects?page_size=1`, {
+        headers: { Authorization: "Basic " + btoa(`${creds.username}:${creds.password}`) },
+      })
+      return resp.ok
+    } catch {
+      return false
+    }
+  }
+
+  // ── Internal: Keycloak grant helpers ───────────────────────────
+
+  async function passwordGrant(username: string, password: string): Promise<KeycloakTokenSet> {
+    const resp = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "password",
+        client_id: KEYCLOAK_ROPC_CLIENT,
+        username,
+        password,
+      }).toString(),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      if (err.error === "invalid_grant") {
+        throw new TokenUnavailableError("用户名或密码错误", "credentials_invalid")
+      }
+      throw new TokenUnavailableError(
+        `Keycloak 登录失败: ${err.error_description ?? err.error ?? resp.status}`,
+        "unknown",
+      )
+    }
+
+    return parseTokenResponse(await resp.json())
+  }
+
+  async function refreshTokenGrant(refreshToken: string): Promise<KeycloakTokenSet> {
+    const resp = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: KEYCLOAK_ROPC_CLIENT,
+        refresh_token: refreshToken,
+      }).toString(),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      if (err.error === "invalid_grant") {
+        throw new TokenUnavailableError("登录已过期，请重新运行 synergy inspire login", "refresh_expired")
+      }
+      throw new Error(`refresh_failed: ${err.error_description ?? err.error ?? resp.status}`)
+    }
+
+    return parseTokenResponse(await resp.json())
+  }
+
+  function parseTokenResponse(data: any): KeycloakTokenSet {
+    const now = Date.now()
+    return {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_in: data.expires_in ?? 3600,
+      refresh_expires_in: data.refresh_expires_in ?? 604800,
+      access_expires_at: now + (data.expires_in ?? 3600) * 1000,
+      refresh_expires_at: now + (data.refresh_expires_in ?? 604800) * 1000,
+    }
+  }
+
+  async function persistTokenSet(tokenSet: KeycloakTokenSet): Promise<void> {
+    const ttl = tokenSet.refresh_expires_in * 1000
+    await pluginCache().set("inspire-keycloak-token", JSON.stringify(tokenSet), ttl)
+  }
+
+  // ── Internal: error classification ─────────────────────────────
+
+  function isAuthError(err: any): boolean {
+    if (err?.status === 401) return true
+    if (err?.code === -1) return true
+    const msg = String(err?.message ?? err ?? "").toLowerCase()
+    return (
+      msg.includes("401") ||
+      msg.includes("unauthorized") ||
+      msg.includes("session expired") ||
+      msg.includes("authentication expired")
+    )
+  }
+
+  // ── Internal: CAS cookie login ─────────────────────────────────
 
   async function performCasLogin(): Promise<string> {
     const creds = await getInspireCredentials()
@@ -377,28 +500,5 @@ export namespace InspireAuth {
     }
 
     return cookieStr
-  }
-
-  export async function testInspireConnection(): Promise<boolean> {
-    try {
-      await requireCookie()
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  export async function testHarborConnection(target: InspireTypes.HarborTarget = "qb"): Promise<boolean> {
-    const creds = await getHarborCredentials(target)
-    if (!creds) return false
-    try {
-      const registry = InspireTypes.harborRegistry(target)
-      const resp = await fetch(`https://${registry}/api/v2.0/projects?page_size=1`, {
-        headers: { Authorization: "Basic " + btoa(`${creds.username}:${creds.password}`) },
-      })
-      return resp.ok
-    } catch {
-      return false
-    }
   }
 }

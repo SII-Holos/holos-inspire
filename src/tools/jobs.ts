@@ -90,8 +90,8 @@ export const inspireJobs = tool({
     for (const ws of workspaceIds) {
       if (typeFilter !== "hpc") {
         try {
-          const { jobs, total } = await InspireAuth.withCookieRetry((cookie) =>
-            InspireAPI.listJobsWithCookie(cookie, ws.id, { pageSize: 100 }),
+          const { jobs, total } = await InspireAuth.withTokenRetry((t) =>
+            InspireAPI.listJobs(t, ws.id, { pageSize: 100 }),
           )
           for (const job of jobs) {
             const s = InspireNormalize.status(job.status ?? "")

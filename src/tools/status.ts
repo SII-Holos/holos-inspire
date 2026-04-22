@@ -121,8 +121,8 @@ export const inspireStatus = tool({
               let totalGpu = 0
               let nodeCount = 0
               try {
-                const nodes = await InspireAuth.withCookieRetry((cookie) =>
-                  InspireAPI.listNodeDimension(cookie, space.id, g.id),
+                const nodes = await InspireAuth.withTokenRetry((t) =>
+                  InspireAPI.listNodeDimension(t, space.id, g.id),
                 )
                 totalGpu = nodes.reduce((sum: number, n: any) => sum + (n.gpu?.total ?? 0), 0)
                 const usedGpu = nodes.reduce((sum: number, n: any) => sum + (n.gpu?.used ?? 0), 0)
