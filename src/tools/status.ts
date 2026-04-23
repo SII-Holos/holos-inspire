@@ -48,8 +48,8 @@ export const inspireStatus = tool({
     const authErr = await requireAuth()
     if (authErr) return authErr
 
-    let projects: any[]
-    projects = await InspireCache.getProjects(params.refresh)
+    const allProjects = await InspireCache.getProjects(params.refresh)
+    let projects: any[] = allProjects
 
     if (params.project) {
       const match = await InspireResolve.project(params.project)
@@ -58,7 +58,7 @@ export const inspireStatus = tool({
       } else {
         return {
           title: "未找到项目",
-          output: `未找到项目 "${params.project}"。可用项目: ${projects.map((p: any) => p.name).join(", ")}`,
+          output: `未找到项目 "${params.project}"。可用项目: ${allProjects.map((p: any) => p.name).join(", ")}`,
           metadata: { error: "project_not_found" } as Record<string, any>,
         }
       }
@@ -93,7 +93,7 @@ export const inspireStatus = tool({
         const network = InspireTypes.WORKSPACE_NETWORK_MAP[space.name]
         const networkLabel =
           network === "internet" ? "✅ 有外网（白名单限制）" : network === "offline" ? "❌ 无外网" : "未知"
-        const linkedProjects = projects
+        const linkedProjects = allProjects
           .filter((p: any) => p.id !== proj.id && (p.space_list ?? []).some((s: any) => s.id === space.id))
           .map((p: any) => p.name)
         const linkedNote = linkedProjects.length > 0 ? ` ⚡同空间也连接: ${linkedProjects.join(", ")}` : ""
