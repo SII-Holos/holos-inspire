@@ -61,8 +61,8 @@ async function handleList(params: any) {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const { items, total } = await InspireAuth.withCookieRetry((cookie) =>
-    InspireAPI.listNotebooks(cookie, ws.id, {
+  const { items, total } = await InspireAuth.withTokenRetry((token) =>
+    InspireAPI.listNotebooks(token, ws.id, {
       page: Math.floor((params.offset ?? 0) / (params.limit ?? 20)) + 1,
       pageSize: Math.min(params.limit ?? 20, 100),
     }),
@@ -101,9 +101,11 @@ async function handleList(params: any) {
       : (nb.logic_compute_group?.name ?? "")
     const createdAt = InspireNormalize.formatTimestamp(nb.created_at)
     const offset = params.offset ?? 0
+    const projectName = nb.project?.name ?? nb.project_name ?? ""
 
     lines.push(`${offset + i + 1}. [${label}] ${nb.name ?? "未命名"}`)
     lines.push(`   ID: ${nb.notebook_id ?? "—"}`)
+    if (projectName) lines.push(`   项目: ${projectName}`)
     if (gpuType) lines.push(`   GPU: ${gpuType}`)
     if (createdAt) lines.push(`   创建于: ${createdAt}`)
     lines.push("")

@@ -93,8 +93,12 @@ export const inspireStatus = tool({
         const network = InspireTypes.WORKSPACE_NETWORK_MAP[space.name]
         const networkLabel =
           network === "internet" ? "✅ 有外网（白名单限制）" : network === "offline" ? "❌ 无外网" : "未知"
+        const linkedProjects = projects
+          .filter((p: any) => p.id !== proj.id && (p.space_list ?? []).some((s: any) => s.id === space.id))
+          .map((p: any) => p.name)
+        const linkedNote = linkedProjects.length > 0 ? ` ⚡同空间也连接: ${linkedProjects.join(", ")}` : ""
         lines.push("")
-        lines.push(`   🖥 空间: ${space.name} (${space.id})`)
+        lines.push(`   🖥 空间: ${space.name} (${space.id})${linkedNote}`)
         lines.push(`      网络: ${networkLabel}`)
 
         try {
@@ -114,6 +118,9 @@ export const inspireStatus = tool({
 
           if (logicGroups.length > 0) {
             lines.push("      计算组:")
+            // Track spec signatures per space to deduplicate across compute groups
+            const seenSpecSignatures = new Map<string, string>() // signature → compute group name
+
             for (const g of logicGroups) {
               const gpuType = formatResourceType(g.resourceTypes[0])
 
@@ -145,27 +152,33 @@ export const inspireStatus = tool({
                 const dswSpecs = await listAvailableSpecs(space.id, g.id, "SCHEDULE_CONFIG_TYPE_DSW")
                 const servingSpecs = await listAvailableSpecs(space.id, g.id, "SCHEDULE_CONFIG_TYPE_SERVING")
 
-                const hasTrain = trainSpecs.length > 0
-                const hasDsw = dswSpecs.length > 0
-                const hasServing = servingSpecs.length > 0
+                // Build a signature from the spec IDs to detect duplicates
+                const specSig = [
+                  `train:${trainSpecs.map((s) => s.quota_id).join(",")}`,
+                  `dsw:${dswSpecs.map((s) => s.quota_id).join(",")}`,
+                  `serving:${servingSpecs.map((s) => s.quota_id).join(",")}`,
+                ].join("|")
 
-                if (hasTrain) {
+                const prevGroup = seenSpecSignatures.get(specSig)
+                if (prevGroup) {
+                  lines.push(`          规格同 ${prevGroup}`)
+                  continue
+                }
+                seenSpecSignatures.set(specSig, g.name)
+
+                const formatSpec = (s: any) => `${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB → ${s.quota_id}`
+
+                if (trainSpecs.length > 0) {
                   lines.push("          训练规格:")
-                  for (const s of trainSpecs) {
-                    lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
-                  }
+                  for (const s of trainSpecs) lines.push(`            ${formatSpec(s)}`)
                 }
-                if (hasDsw) {
+                if (dswSpecs.length > 0) {
                   lines.push("          Notebook 规格:")
-                  for (const s of dswSpecs) {
-                    lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
-                  }
+                  for (const s of dswSpecs) lines.push(`            ${formatSpec(s)}`)
                 }
-                if (hasServing) {
+                if (servingSpecs.length > 0) {
                   lines.push("          推理服务规格:")
-                  for (const s of servingSpecs) {
-                    lines.push(`            ${s.gpu_count}GPU / ${s.cpu_count}CPU / ${s.memory_size_gib}GB内存 / ${s.total_price_per_hour}点券/h → spec_id: ${s.quota_id}`)
-                  }
+                  for (const s of servingSpecs) lines.push(`            ${formatSpec(s)}`)
                 }
               } catch {}
             }

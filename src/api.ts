@@ -306,15 +306,15 @@ export namespace InspireAPI {
   export type NotebookOperation = "START" | "STOP"
 
   export async function listNotebooks(
-    cookie: string,
+    token: string,
     workspaceId: string,
     opts?: { page?: number; pageSize?: number },
   ): Promise<{ items: any[]; total: number }> {
-    const data = await postInternal("/api/v1/notebook/list", {
+    const data = await postV2("notebook", "ListNotebooks", {
       workspace_id: workspaceId,
       page_size: opts?.pageSize ?? 100,
       page: opts?.page ?? 1,
-    }, cookie, workspaceId)
+    }, token)
     return { items: data.list ?? [], total: data.total ?? 0 }
   }
 
