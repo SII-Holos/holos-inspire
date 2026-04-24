@@ -4,23 +4,23 @@ import { InspireHarbor } from "../harbor"
 import { InspireAuth } from "../auth"
 import { InspireTypes } from "../types"
 
-const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry.
+const DESCRIPTION = `Push a Docker image to the SII 启智平台 Harbor registry. ALWAYS use this tool instead of running docker push via bash.
 
-Two registries with separate credentials:
-- 七宝 (default, registry="qb"): push to ${InspireTypes.HARBOR_REGISTRY}, serves all spaces except SJ资源空间
-- 松江 (registry="sj"): push to docker-t.sii.edu.cn, serves SJ资源空间 only
+Why this tool instead of bash docker push:
+- Automatically logs in to Harbor with the correct credentials (no manual docker login needed)
+- Handles the inspire-studio/ project path prefix automatically
+- Returns the display-domain address (docker.sii.shaipower.online) needed by inspire_submit and inspire_notebook
+- Provides the exact 镜像名称 and 版本号 values needed for platform registration after push
 
-Prerequisites:
-- Docker must be installed and running locally
-- Add insecure registry to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
-- Harbor credentials configured (synergy inspire harbor-login). 七宝 and 松江 have different passwords — find them under 镜像管理 → 本地推送
-- Must be on VPN or campus network
+Running docker push via bash will fail without Harbor authentication and will not guide the user through the required registration step.
 
-After pushing, you MUST register the image on the platform:
-Go to 镜像管理 → 新建镜像, fill in 镜像名称 (same as the name parameter, e.g. 'faro-postgres') and 版本号 (same as the tag parameter, e.g. 'v1'), then save.
-Without registration, the image cannot be used for task submission or notebook creation.
+Two registries:
+- 七宝 (default, registry="qb"): serves all spaces except SJ资源空间
+- 松江 (registry="sj"): serves SJ资源空间 only
 
-The push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain (docker.sii.shaipower.online). Always use the platform-assigned display address when submitting tasks.`
+Prerequisites: Docker running locally, insecure-registry configured in /etc/docker/daemon.json, VPN or campus network.
+
+After pushing, the user MUST register the image on the platform (镜像管理 → 新建镜像) with the 镜像名称 and 版本号 shown in the output. Without registration, the image cannot be used for task submission or notebook creation.`
 
 export const inspireImagePush = tool({
   description: DESCRIPTION,
