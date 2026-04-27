@@ -175,8 +175,10 @@ export namespace InspireAuth {
           "启智平台账号未配置。",
           "",
           "请通过以下方式登录：",
-          "  1. CLI: synergy inspire login",
-          "  2. 或直接提供学工号和密码，agent 可以帮你执行登录",
+          "  CLI: synergy inspire login --username <学工号> --password <密码>",
+          "",
+          "使用你的启智平台（学工号）账号和密码。",
+          "也可以直接告诉 agent 你的学工号和密码，agent 会帮你执行登录。",
         ].join("\n"),
         metadata: { error: "inspire_not_authenticated" },
       }
@@ -187,12 +189,13 @@ export namespace InspireAuth {
         "Harbor 镜像仓库账号未配置。",
         "",
         "请通过以下方式登录：",
-        "  1. CLI: synergy inspire harbor-login (七宝, 默认)",
-        "  2. CLI: synergy inspire harbor-login --registry sj (松江)",
+        "  synergy inspire harbor-login --username <用户名> --password <密码>",
+        "  synergy inspire harbor-login --username <用户名> --password <密码> --registry sj  (松江)",
         "",
-        "Harbor 的用户名和密码可在启智平台「镜像管理 → 本地推送」页面查看。",
-        "首次打开该页面时会显示用户名和密码，请妥善保存。",
-        "注意：七宝和松江的密码不同，需要分别配置。",
+        "⚠️ Harbor 账号不是你的启智平台账号！",
+        "Harbor 的用户名和密码需在启智平台「镜像管理 → 本地推送」页面查看。",
+        "首次打开该页面时会显示用户名（形如 robot$inspire-studio+user-...）和密码，请妥善保存。",
+        "七宝和松江的密码不同，需要分别配置。",
       ].join("\n"),
       metadata: { error: "harbor_not_authenticated" },
     }
@@ -207,10 +210,10 @@ export namespace InspireAuth {
       if (err instanceof TokenUnavailableError) throw err
       const msg = String(err?.message ?? err ?? "").toLowerCase()
       if (msg.includes("invalid_grant") || msg.includes("credentials_invalid")) {
-        throw new TokenUnavailableError("用户名或密码错误，请重新运行 synergy inspire login。", "credentials_invalid")
+        throw new TokenUnavailableError("用户名或密码错误，请重新运行 synergy inspire login --username <学工号> --password <密码>", "credentials_invalid")
       }
       if (msg.includes("inspire_not_authenticated") || msg.includes("not_authenticated")) {
-        throw new TokenUnavailableError("启智平台账号未配置。请运行 synergy inspire login。", "not_authenticated")
+        throw new TokenUnavailableError("启智平台账号未配置。请运行 synergy inspire login --username <学工号> --password <密码>", "not_authenticated")
       }
       throw new TokenUnavailableError(`认证失败: ${err?.message ?? err}`, "unknown")
     }
@@ -283,7 +286,7 @@ export namespace InspireAuth {
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}))
       if (err.error === "invalid_grant") {
-        throw new TokenUnavailableError("登录已过期，请重新运行 synergy inspire login", "refresh_expired")
+        throw new TokenUnavailableError("登录已过期，请重新运行 synergy inspire login --username <学工号> --password <密码>", "refresh_expired")
       }
       throw new Error(`refresh_failed: ${err.error_description ?? err.error ?? resp.status}`)
     }

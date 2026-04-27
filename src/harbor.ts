@@ -131,7 +131,7 @@ export namespace InspireHarbor {
     const creds = await InspireAuth.getHarborCredentials(target)
     if (!creds) {
       const registryName = target === "sj" ? "松江 (docker-t.sii.edu.cn)" : "七宝 (docker-qb.sii.edu.cn)"
-      throw new Error(`harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --registry ${target}`)
+      throw new Error(`harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --username <用户名> --password <密码> --registry ${target}\n⚠️ Harbor 账号不是启智平台账号，需在「镜像管理 → 本地推送」页面获取。`)
     }
 
     // Strip project prefix if user accidentally included it (e.g. "inspire-studio/faro-postgres" → "faro-postgres")
