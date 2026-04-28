@@ -2,6 +2,7 @@ import type { Plugin } from "@ericsanchezok/synergy-plugin"
 import { initContext } from "./ctx"
 
 import { inspireConfig } from "./tools/config"
+import { inspireLogin } from "./tools/login"
 import { inspireStatus } from "./tools/status"
 import { inspireSubmit } from "./tools/submit"
 import { inspireSubmitHpc } from "./tools/submit-hpc"
@@ -26,6 +27,7 @@ export const InspirePlugin: Plugin = {
     return {
       tool: {
         inspire_config: inspireConfig,
+        inspire_login: inspireLogin,
         inspire_status: inspireStatus,
         inspire_submit: inspireSubmit,
         inspire_submit_hpc: inspireSubmitHpc,

@@ -174,11 +174,10 @@ export namespace InspireAuth {
         output: [
           "启智平台账号未配置。",
           "",
-          "请通过以下方式登录：",
-          "  CLI: synergy inspire login --username <学工号> --password <密码>",
+          "请告诉 agent 你的学工号和密码，agent 会通过 inspire_login 工具帮你完成登录。",
+          "例如：\"帮我登录启智平台，学工号 xxx，密码 yyy\"",
           "",
-          "使用你的启智平台（学工号）账号和密码。",
-          "也可以直接告诉 agent 你的学工号和密码，agent 会帮你执行登录。",
+          "也可以通过 CLI 登录：synergy inspire login --username <学工号> --password <密码>",
         ].join("\n"),
         metadata: { error: "inspire_not_authenticated" },
       }
@@ -188,9 +187,10 @@ export namespace InspireAuth {
       output: [
         "Harbor 镜像仓库账号未配置。",
         "",
-        "请通过以下方式登录：",
-        "  synergy inspire harbor-login --username <用户名> --password <密码>",
-        "  synergy inspire harbor-login --username <用户名> --password <密码> --registry sj  (松江)",
+        "请告诉 agent 你的 Harbor 用户名和密码，agent 会通过 inspire_login 工具帮你完成登录。",
+        "例如：\"帮我登录 Harbor，用户名 xxx，密码 yyy\"",
+        "",
+        "也可以通过 CLI 登录：synergy inspire harbor-login --username <用户名> --password <密码>",
         "",
         "⚠️ Harbor 账号不是你的启智平台账号！",
         "Harbor 的用户名和密码需在启智平台「镜像管理 → 本地推送」页面查看。",
