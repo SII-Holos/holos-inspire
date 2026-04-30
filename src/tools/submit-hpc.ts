@@ -127,7 +127,6 @@ export const inspireSubmitHpc = tool({
     const instances = params.instances ?? 1
 
     let result: any
-    let usedOpenAPI = false
 
     try {
       const token = await InspireAuth.ensureToken()
@@ -137,7 +136,7 @@ export const inspireSubmitHpc = tool({
       }
 
       result = await InspireAuth.withTokenRetry((t) =>
-        InspireAPI.createHpcJobOpenAPI(t, {
+        InspireAPI.createHpcJob(t, {
           name: params.name,
           workspace_id: ws.id,
           project_id: proj.id,
@@ -155,7 +154,6 @@ export const inspireSubmitHpc = tool({
           ttl_after_finish_seconds: params.ttl_after_finish_seconds,
         }),
       )
-      usedOpenAPI = true
       InspireCache.setCachedSpecId(ws.id, cg.id, specId)
     } catch (err: any) {
       if (err instanceof InspireAuth.TokenUnavailableError && err.reason === "not_authenticated") {
@@ -167,61 +165,10 @@ export const inspireSubmitHpc = tool({
         return specInvalidError(specId ?? "", ws.id, cg.id, cg.name, "SCHEDULE_CONFIG_TYPE_HPC")
       }
 
-      if (!specId) {
-        specId = ""
-      }
-
-      const cpu = cpus_per_task
-      const memGi = parseInt(memory_per_cpu, 10) || 4
-
-      try {
-        result = await InspireAuth.withCookieRetry((cookie) =>
-          InspireAPI.createHpcJob(cookie, {
-            job_name: params.name,
-            workspace_id: ws.id,
-            project_id: proj.id,
-            logic_compute_group_id: cg.id,
-            enable_notification: false,
-            dataset_info: [],
-            sbatch_script: {
-              number_of_tasks,
-              cpus_per_task,
-              memory_per_cpu,
-              enable_hyper_threading,
-              max_running_time_days: 0,
-              max_running_time_hours: 0,
-              max_running_time_minutes: 0,
-              entrypoint: params.entrypoint,
-            },
-            slurm_cluster_spec: {
-              predef_quota_id: specId ?? "",
-              cpu,
-              mem_gi: memGi,
-              image,
-              image_type: params.image_type ?? "SOURCE_PRIVATE",
-              instance_count: instances,
-              spec_price: {
-                cpu_type: "",
-                cpu_count: cpu,
-                gpu_type: "",
-                gpu_count: 0,
-                memory_size_gib: memGi,
-                logic_compute_group_id: cg.id,
-                quota_id: specId ?? "",
-              },
-            },
-          }),
-        )
-        warnings.push("⚠ 使用了备用认证方式提交")
-      } catch (cookieErr: any) {
-        if (String(cookieErr).includes("inspire_not_authenticated")) {
-          return InspireAuth.notAuthenticatedError("inspire")
-        }
-        return {
-          title: "提交失败",
-          output: `HPC 任务提交失败: ${cookieErr.message ?? cookieErr}`,
-          metadata: { error: "submit_failed" } as Record<string, any>,
-        }
+      return {
+        title: "提交失败",
+        output: `HPC 任务提交失败: ${errMsg}\n\n常见原因: 镜像不存在、计算组已满、点券不足、spec_id 不匹配`,
+        metadata: { error: "submit_failed" } as Record<string, any>,
       }
     }
 

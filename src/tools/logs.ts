@@ -46,25 +46,25 @@ export const inspireLogs = tool({
       }
     }
 
-    let cookie: string
+    let token: string
     try {
-      cookie = await InspireAuth.requireCookie()
+      token = await InspireAuth.ensureToken()
     } catch {
       return InspireAuth.notAuthenticatedError("inspire")
     }
 
-    const instanceCount = await resolveInstanceCount(cookie, params.job_id)
+    const instanceCount = await resolveInstanceCount(token, params.job_id)
 
     if (params.download) {
-      return handleDownload(cookie, params, instanceCount)
+      return handleDownload(token, params, instanceCount)
     }
-    return handleQuery(cookie, params, instanceCount)
+    return handleQuery(token, params, instanceCount)
   },
 })
 
-async function resolveInstanceCount(cookie: string, jobId: string): Promise<number> {
+async function resolveInstanceCount(token: string, jobId: string): Promise<number> {
   try {
-    const job = await InspireAuth.withCookieRetry((c) => InspireAPI.getJobDetail(c, jobId))
+    const job = await InspireAuth.withTokenRetry((t) => InspireAPI.getJobDetail(t, jobId))
     const gpuInfo = InspireAPI.extractGpuInfo(job)
     return gpuInfo.instance_count
   } catch {
@@ -72,13 +72,13 @@ async function resolveInstanceCount(cookie: string, jobId: string): Promise<numb
   }
 }
 
-async function handleQuery(cookie: string, params: any, instanceCount: number) {
+async function handleQuery(token: string, params: any, instanceCount: number) {
   const startMs = params.start_time ? String(new Date(params.start_time).getTime()) : undefined
   const endMs = params.end_time ? String(new Date(params.end_time).getTime()) : undefined
 
   const fetchSize = params.keyword ? Math.min(params.lines * 3, 500) : params.lines
 
-  const { logs, total } = await InspireAPI.getTrainLogs(cookie, {
+  const { logs, total } = await InspireAPI.getTrainLogs(token, {
     jobId: params.job_id,
     instanceCount,
     pageSize: fetchSize,
@@ -135,7 +135,7 @@ async function handleQuery(cookie: string, params: any, instanceCount: number) {
   }
 }
 
-async function handleDownload(cookie: string, params: any, instanceCount: number) {
+async function handleDownload(token: string, params: any, instanceCount: number) {
   const filePath = params.download_path || `/tmp/${params.job_id}-logs.txt`
 
   const allLogs: InspireAPI.TrainLogEntry[] = []
@@ -144,7 +144,7 @@ async function handleDownload(cookie: string, params: any, instanceCount: number
   let total = Infinity
 
   while (fetched < total) {
-    const { logs, total: t } = await InspireAPI.getTrainLogs(cookie, {
+    const { logs, total: t } = await InspireAPI.getTrainLogs(token, {
       jobId: params.job_id,
       instanceCount,
       pageSize,

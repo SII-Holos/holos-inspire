@@ -89,11 +89,6 @@ export namespace InspireTypes {
     saved_at: number
   }
 
-  export interface TokenCache {
-    token: string
-    expires_at: number
-  }
-
   export interface HarborRepository {
     name: string
     description: string

@@ -1,11 +1,8 @@
 import type { Plugin } from "@ericsanchezok/synergy-plugin"
 import { initContext } from "./ctx"
-import SKILL_CONTENT from "../skills/sii-inspire/content.txt"
-import PLATFORM_GUIDE from "../skills/sii-inspire/references/platform-guide.txt"
-import TROUBLESHOOTING from "../skills/sii-inspire/references/troubleshooting.txt"
-import DISTRIBUTED_TRAINING from "../skills/sii-inspire/references/distributed-training.txt"
 
 import { inspireConfig } from "./tools/config"
+import { inspireLogin } from "./tools/login"
 import { inspireStatus } from "./tools/status"
 import { inspireSubmit } from "./tools/submit"
 import { inspireSubmitHpc } from "./tools/submit-hpc"
@@ -30,6 +27,7 @@ export const InspirePlugin: Plugin = {
     return {
       tool: {
         inspire_config: inspireConfig,
+        inspire_login: inspireLogin,
         inspire_status: inspireStatus,
         inspire_submit: inspireSubmit,
         inspire_submit_hpc: inspireSubmitHpc,
@@ -50,12 +48,7 @@ export const InspirePlugin: Plugin = {
           name: "sii-inspire",
           description:
             "SII 启智平台 GPU cluster tools for autonomous research. Covers: task submission (GPU/HPC), image management (Harbor), resource monitoring, and platform troubleshooting. Triggers: '启智', 'inspire', 'submit job', 'GPU training', '提交任务', '训练任务', 'docker image', '镜像', 'HPC', 'check GPU', '查看资源'.",
-          content: SKILL_CONTENT,
-          references: {
-            "references/platform-guide.txt": PLATFORM_GUIDE,
-            "references/troubleshooting.txt": TROUBLESHOOTING,
-            "references/distributed-training.txt": DISTRIBUTED_TRAINING,
-          },
+          dir: "skills/sii-inspire",
         },
       ],
 
@@ -84,7 +77,7 @@ export const InspirePlugin: Plugin = {
           },
           async execute(args) {
             const { InspireAuth } = await import("./auth")
-            const target = args.registry === "sj" ? "sj" as const : "qb" as const
+            const target = args.registry === "sj" ? ("sj" as const) : ("qb" as const)
             await InspireAuth.saveHarborCredentials(args.username, args.password, target)
             const ok = await InspireAuth.testHarborConnection(target)
             const registryName = target === "sj" ? "docker-t.sii.edu.cn (松江)" : "docker-qb.sii.edu.cn (七宝)"
@@ -95,8 +88,7 @@ export const InspirePlugin: Plugin = {
         },
       },
 
-      async dispose() {
-      },
+      async dispose() {},
     }
   },
 }

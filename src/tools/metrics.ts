@@ -304,7 +304,7 @@ function fmtSummaryLine(name: string, s: MetricSummary): string {
 }
 
 async function fetchMetrics(
-  cookie: string,
+  token: string,
   job: any,
   params: any,
 ): Promise<{ groups: MetricTimeSeries[]; startTs: number; endTs: number; intervalSec: number } | null> {
@@ -339,7 +339,7 @@ async function fetchMetrics(
   const allGroups: MetricTimeSeries[] = []
   const results = await Promise.allSettled(
     metricTypes.map((mt) =>
-      InspireAPI.getClusterMetrics(cookie, {
+      InspireAPI.getClusterMetrics(token, {
         computeGroupId,
         taskId: params.job_id,
         metricTypes: [mt],
@@ -541,10 +541,11 @@ export const inspireMetrics = tool({
       }
     }
 
+    let token: string
     let job: any
     try {
-      const cookie = await InspireAuth.requireCookie()
-      job = await InspireAuth.withCookieRetry((c) => InspireAPI.getJobDetail(c, params.job_id))
+      token = await InspireAuth.ensureToken()
+      job = await InspireAuth.withTokenRetry((t) => InspireAPI.getJobDetail(t, params.job_id))
     } catch {
       return {
         title: "查询失败",
@@ -562,8 +563,7 @@ export const inspireMetrics = tool({
       }
     }
 
-    const cookie = await InspireAuth.requireCookie()
-    const fetchResult = await fetchMetrics(cookie, job, params).catch(() => null)
+    const fetchResult = await fetchMetrics(token, job, params).catch(() => null)
     if (!fetchResult) {
       return {
         title: "查询失败",

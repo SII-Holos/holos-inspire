@@ -6,7 +6,8 @@ import { InspireNormalize } from "../normalize"
 import { InspireCache } from "../cache"
 import { classifyJobId, requireAuth } from "../shared"
 
-async function findJobViaCookie(jobId: string): Promise<any | undefined> {
+async function findJobViaList(jobId: string): Promise<any | undefined> {
+  const token = await InspireAuth.ensureToken()
   const projects = await InspireCache.getProjects()
   const wsIds = new Set<string>()
   for (const proj of projects) {
@@ -14,9 +15,7 @@ async function findJobViaCookie(jobId: string): Promise<any | undefined> {
   }
   for (const wsId of wsIds) {
     try {
-      const { jobs } = await InspireAuth.withCookieRetry((cookie) =>
-        InspireAPI.listJobsWithCookie(cookie, wsId, { pageSize: 100 }),
-      )
+      const { jobs } = await InspireAuth.withTokenRetry((t) => InspireAPI.listJobs(t, wsId, { pageSize: 100 }))
       const match = jobs.find((j: any) => (j.job_id ?? j.id) === jobId)
       if (match) return match
     } catch {}
@@ -61,16 +60,12 @@ async function handleGpuDetail(jobId: string) {
 
   try {
     const token = await InspireAuth.ensureToken()
-    job = await InspireAuth.withTokenRetry((t) => InspireAPI.getJobDetailOpenAPI(t, jobId))
+    job = await InspireAuth.withTokenRetry((t) => InspireAPI.getJobDetail(t, jobId))
   } catch {
     try {
-      job = await InspireAuth.withCookieRetry((cookie) => InspireAPI.getJobDetail(cookie, jobId))
-    } catch {
-      try {
-        const found = await findJobViaCookie(jobId)
-        if (found) job = found
-      } catch {}
-    }
+      const found = await findJobViaList(jobId)
+      if (found) job = found
+    } catch {}
   }
 
   if (!job) {
@@ -222,8 +217,8 @@ async function handleGpuDetail(jobId: string) {
 
   if (statusInfo.family === "failed" || statusInfo.family === "running") {
     try {
-      const cookie = await InspireAuth.requireCookie()
-      const { logs, total } = await InspireAPI.getTrainLogs(cookie, {
+      const token = await InspireAuth.ensureToken()
+      const { logs, total } = await InspireAPI.getTrainLogs(token, {
         jobId: job.job_id ?? jobId,
         instanceCount: gpuInfo.instance_count,
         pageSize: 50,
@@ -276,7 +271,7 @@ async function handleHpcDetail(jobId: string) {
   let job: any
   try {
     const token = await InspireAuth.ensureToken()
-    job = await InspireAuth.withTokenRetry((t) => InspireAPI.getHpcJobDetailOpenAPI(t, jobId))
+    job = await InspireAuth.withTokenRetry((t) => InspireAPI.getHpcJobDetail(t, jobId))
   } catch {
     return {
       title: "查询失败",
@@ -289,14 +284,15 @@ async function handleHpcDetail(jobId: string) {
   const createdAt = InspireNormalize.formatTimestamp(job.created_at)
   const duration = InspireNormalize.formatDuration(job.running_time_ms)
   const url = InspireAPI.buildJobUrl(jobId, job.workspace_id, "hpc")
+  const jobName = job.job_name ?? job.name ?? jobId
 
   const lines = [
-    `=== HPC 任务详情: ${job.name} ===`,
+    `=== HPC 任务详情: ${jobName} ===`,
     "",
     "基本信息:",
     `  任务 ID: ${jobId}`,
     `  类型: HPC (Slurm)`,
-    `  状态: ${statusInfo.family} (${statusInfo.raw})`,
+    `  状态: ${statusInfo.family === "unknown" ? statusInfo.raw : statusInfo.family} (${statusInfo.raw})`,
     `  创建于: ${createdAt}`,
     `  运行时长: ${duration || "—"}`,
     "",
@@ -323,7 +319,7 @@ async function handleHpcDetail(jobId: string) {
   )
 
   return {
-    title: `${job.name} (${statusInfo.family})`,
+    title: `${jobName} (${statusInfo.family})`,
     output: lines.join("\n"),
     metadata: {
       job_id: jobId,
@@ -339,7 +335,7 @@ async function handleInferenceDetail(servingId: string) {
 
   try {
     const token = await InspireAuth.ensureToken()
-    serving = await InspireAuth.withTokenRetry((t) => InspireAPI.getInferenceDetailOpenAPI(t, servingId))
+    serving = await InspireAuth.withTokenRetry((t) => InspireAPI.getInferenceDetail(t, servingId))
   } catch (err: any) {
     return {
       title: "查询失败",

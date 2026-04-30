@@ -81,7 +81,7 @@ export namespace InspireCache {
     const workspaceInfo: CacheData["workspaceInfo"] = {}
     for (const wsId of workspaceIds) {
       try {
-        const clusterInfo = await InspireAuth.withCookieRetry((cookie) => InspireAPI.getClusterBasicInfo(cookie, wsId))
+        const clusterInfo = await InspireAuth.withTokenRetry((t) => InspireAPI.getClusterBasicInfo(t, wsId))
         workspaceInfo[wsId] = { clusterInfo }
       } catch (err) {
         console.warn("[inspire.cache] failed to fetch cluster info", wsId, String(err))

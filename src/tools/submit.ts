@@ -179,19 +179,6 @@ export const inspireSubmit = tool({
         if (err.reason === "not_authenticated") {
           return InspireAuth.notAuthenticatedError("inspire")
         }
-        if (err.reason === "openapi_not_enabled") {
-          return {
-            title: "API 权限未开通",
-            output: [
-              "当前账号未开通 API 权限，无法提交任务。",
-              "",
-              "请联系平台管理员开通 API 权限。",
-              "",
-              "验证方式: 在启智平台「个人中心 → API 管理」页面查看是否有相关管理入口。",
-            ].join("\n"),
-            metadata: { error: "openapi_not_enabled" } as Record<string, any>,
-          }
-        }
         return {
           title: "提交失败",
           output: `平台 API 认证失败: ${err.message}`,
@@ -212,7 +199,7 @@ export const inspireSubmit = tool({
     let result: any
     try {
       result = await InspireAuth.withTokenRetry((t) =>
-        InspireAPI.createJobOpenAPI(t, {
+        InspireAPI.createJob(t, {
           name: params.name,
           workspace_id: ws.id,
           project_id: proj.id,

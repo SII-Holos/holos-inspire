@@ -74,8 +74,8 @@ export async function listAvailableSpecs(
   scheduleType?: string,
 ): Promise<InspireAPI.ResourceSpec[]> {
   try {
-    return await InspireAuth.withCookieRetry((cookie: string) =>
-      InspireAPI.listResourceSpecs(cookie, workspaceId, computeGroupId, scheduleType),
+    return await InspireAuth.withTokenRetry((t: string) =>
+      InspireAPI.listResourceSpecs(t, workspaceId, computeGroupId, scheduleType),
     )
   } catch {
     return []

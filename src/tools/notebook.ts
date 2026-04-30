@@ -61,8 +61,8 @@ async function handleList(params: any) {
   if (!("ws" in wsResult)) return wsResult
   const ws = wsResult.ws
 
-  const { items, total } = await InspireAuth.withCookieRetry((cookie) =>
-    InspireAPI.listNotebooks(cookie, ws.id, {
+  const { items, total } = await InspireAuth.withTokenRetry((token) =>
+    InspireAPI.listNotebooks(token, ws.id, {
       page: Math.floor((params.offset ?? 0) / (params.limit ?? 20)) + 1,
       pageSize: Math.min(params.limit ?? 20, 100),
     }),
@@ -101,9 +101,11 @@ async function handleList(params: any) {
       : (nb.logic_compute_group?.name ?? "")
     const createdAt = InspireNormalize.formatTimestamp(nb.created_at)
     const offset = params.offset ?? 0
+    const projectName = nb.project?.name ?? nb.project_name ?? ""
 
     lines.push(`${offset + i + 1}. [${label}] ${nb.name ?? "未命名"}`)
     lines.push(`   ID: ${nb.notebook_id ?? "—"}`)
+    if (projectName) lines.push(`   项目: ${projectName}`)
     if (gpuType) lines.push(`   GPU: ${gpuType}`)
     if (createdAt) lines.push(`   创建于: ${createdAt}`)
     lines.push("")
@@ -131,7 +133,8 @@ async function handleDetail(params: any) {
 
   let nb: any
   try {
-    nb = await InspireAuth.withCookieRetry((cookie) => InspireAPI.getNotebookDetail(cookie, params.notebook_id!))
+    const token = await InspireAuth.ensureToken()
+    nb = await InspireAuth.withTokenRetry((t) => InspireAPI.getNotebookDetail(t, params.notebook_id!))
   } catch (err: any) {
     return {
       title: "查询失败",
@@ -204,7 +207,8 @@ async function handleOperate(params: any, operation: "START" | "STOP") {
   const opLabel = operation === "START" ? "启动" : "停止"
 
   try {
-    await InspireAuth.withCookieRetry((cookie) => InspireAPI.operateNotebook(cookie, params.notebook_id!, operation))
+    const token = await InspireAuth.ensureToken()
+    await InspireAuth.withTokenRetry((t) => InspireAPI.operateNotebook(t, params.notebook_id!, operation))
     return {
       title: `已${opLabel} ${params.notebook_id}`,
       output: `✅ 笔记本 ${params.notebook_id} 已${opLabel}`,

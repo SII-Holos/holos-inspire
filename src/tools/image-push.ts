@@ -4,23 +4,23 @@ import { InspireHarbor } from "../harbor"
 import { InspireAuth } from "../auth"
 import { InspireTypes } from "../types"
 
-const DESCRIPTION = `Push a local Docker image to the SII 启智平台 Harbor registry.
+const DESCRIPTION = `Push a Docker image to the SII 启智平台 Harbor registry. ALWAYS use this tool instead of running docker push via bash.
 
-Two registries with separate credentials:
-- 七宝 (default, registry="qb"): push to ${InspireTypes.HARBOR_REGISTRY}, serves all spaces except SJ资源空间
-- 松江 (registry="sj"): push to docker-t.sii.edu.cn, serves SJ资源空间 only
+Why this tool instead of bash docker push:
+- Automatically logs in to Harbor with the correct credentials (no manual docker login needed)
+- Handles the inspire-studio/ project path prefix automatically
+- Returns the display-domain address (docker.sii.shaipower.online) needed by inspire_submit and inspire_notebook
+- Provides the exact 镜像名称 and 版本号 values needed for platform registration after push
 
-Prerequisites:
-- Docker must be installed and running locally
-- Add insecure registry to /etc/docker/daemon.json: { "insecure-registries": ["${InspireTypes.HARBOR_REGISTRY}"] }, then restart Docker
-- Harbor credentials configured (synergy inspire harbor-login). 七宝 and 松江 have different passwords — find them under 镜像管理 → 本地推送
-- Must be on VPN or campus network
+Running docker push via bash will fail without Harbor authentication and will not guide the user through the required registration step.
 
-After pushing, you MUST register the image on the platform:
-Go to 镜像管理 → 新建镜像, fill in 镜像名称 and 版本号, then save.
-Without registration, the image cannot be used for task submission or notebook creation.
+Two registries:
+- 七宝 (default, registry="qb"): serves all spaces except SJ资源空间
+- 松江 (registry="sj"): serves SJ资源空间 only
 
-The push domain (${InspireTypes.HARBOR_REGISTRY}) differs from the display domain (docker.sii.shaipower.online). Always use the platform-assigned display address when submitting tasks.`
+Prerequisites: Docker running locally, insecure-registry configured in /etc/docker/daemon.json, VPN or campus network.
+
+After pushing, the user MUST register the image on the platform (镜像管理 → 新建镜像) with the 镜像名称 and 版本号 shown in the output. Without registration, the image cannot be used for task submission or notebook creation.`
 
 export const inspireImagePush = tool({
   description: DESCRIPTION,
@@ -31,7 +31,7 @@ export const inspireImagePush = tool({
     name: z
       .string()
       .optional()
-      .describe("Remote 镜像名称. Defaults to the image name part. Final path: inspire-studio/{name}"),
+      .describe("Remote 镜像名称（不含项目前缀）. E.g. use 'faro-postgres', NOT 'inspire-studio/faro-postgres'. The tool auto-prepends the project path. Defaults to the image name part"),
     tag: z.string().optional().describe("Remote 版本号. Defaults to the image tag part"),
     registry: z
       .enum(["qb", "sj"])
@@ -41,7 +41,7 @@ export const inspireImagePush = tool({
       .string()
       .optional()
       .describe(
-        "Repository description (e.g. 'PyTorch 2.9 + CUDA 12.8 + DeepSpeed'). Set on first push to help identify the image later",
+        "镜像描述（如 'PyTorch 2.9 + CUDA 12.8 + DeepSpeed'）。首次推送时设置，方便后续识别",
       ),
   },
   async execute(params, ctx) {
@@ -59,12 +59,13 @@ export const inspireImagePush = tool({
 
       const remoteName = params.name ?? parsedName
       const remoteTag = params.tag ?? parsedTag
+      const target = params.registry ?? "qb"
 
       const result = await InspireHarbor.pushImage({
         localImage: params.image,
         remoteName,
         remoteTag,
-        target: params.registry,
+        target,
       })
 
       let descriptionSet = false
@@ -75,16 +76,25 @@ export const inspireImagePush = tool({
         } catch {}
       }
 
-      const lines = ["=== 镜像推送成功 ===", "", `完整地址: ${result.fullPath}`]
+      // Build display domain address (replace push domain with display domain)
+      const displayDomain = target === "sj" ? "docker-t.sii.shaipower.online" : "docker.sii.shaipower.online"
+      const displayPath = result.fullPath.replace(/^[^/]+/, displayDomain)
+
+      const lines = ["=== 镜像推送成功 ===", "", `推送地址: ${result.fullPath}`, `使用地址: ${displayPath}`]
+      if (result.warnedDuplicatePath) {
+        lines.push("⚠ name 参数包含了项目前缀（如 inspire-studio/），已自动去除。下次直接用镜像名称即可，如 'faro-postgres' 而非 'inspire-studio/faro-postgres'")
+      }
       if (result.digest) lines.push(`Digest: ${result.digest}`)
       if (params.description && descriptionSet) lines.push(`描述: ${params.description}`)
       if (params.description && !descriptionSet) lines.push("⚠ 描述设置失败（权限不足），推送本身已成功")
       lines.push(
         "",
-        "下一步:",
-        "  1. 在平台「镜像管理 → 新建镜像」中注册该镜像（填写仓库名和Tag）",
-        "  2. 注册后即可在 inspire_submit 中使用:",
-        `     inspire_submit(image="${result.fullPath}", ...)`,
+        "下一步（必须）:",
+        "  在平台「镜像管理 → 新建镜像」中注册该镜像：",
+        `    镜像名称: ${remoteName}`,
+        `    版本号: ${remoteTag}`,
+        `  注册后即可在 inspire_submit 中使用:`,
+        `     inspire_submit(image="${displayPath}", ...)`,
       )
 
       return {
@@ -122,6 +132,23 @@ export const inspireImagePush = tool({
           title: "推送失败",
           output: "推送失败，请确认处于 VPN 或校园网环境。",
           metadata: { error: "network_error" },
+        }
+      }
+      if (msg.includes("unavailable") || msg.includes("unknown error") || msg.includes("error from registry")) {
+        const remoteName = params.name ?? params.image.split(":")[0]
+        return {
+          title: "推送失败",
+          output: [
+            "推送失败，Harbor 返回 Unavailable 或 unknown error。可能原因：",
+            "",
+            "1. Robot 账号没有 push 到该仓库的权限——检查账号权限范围",
+            "2. Harbor 服务暂时不可用——稍后重试",
+            "3. 网络不稳定——确认 VPN 或校园网连接正常",
+            "",
+            "提示：Harbor 支持自动创建仓库，无需预先创建。如持续失败，请联系平台管理员。",
+            "临时方案：用 docker save 导出 .tar 文件，在平台页面手动上传。",
+          ].join("\n"),
+          metadata: { error: "harbor_unavailable", remoteName },
         }
       }
 

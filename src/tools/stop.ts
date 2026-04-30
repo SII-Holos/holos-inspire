@@ -52,15 +52,6 @@ export const inspireStop = tool({
     } catch (err: any) {
       if (err instanceof InspireAuth.TokenUnavailableError) {
         if (err.reason === "not_authenticated") return InspireAuth.notAuthenticatedError("inspire")
-        if (err.reason === "openapi_not_enabled") {
-          return {
-            title: "API 权限未开通",
-            output: ["当前账号未开通 API 权限，无法停止任务。", "", "请联系平台管理员开通 API 权限。"].join(
-              "\n",
-            ),
-            metadata: { error: "openapi_not_enabled" } as Record<string, any>,
-          }
-        }
         return {
           title: "停止失败",
           output: `平台 API 认证失败: ${err.message}`,
@@ -77,14 +68,16 @@ export const inspireStop = tool({
     if (params.job_id) {
       const type = classifyJobId(params.job_id)
       try {
-        await InspireAuth.withTokenRetry((t) => {
+        await InspireAuth.withTokenRetry(async (t) => {
           switch (type) {
             case "hpc":
-              return InspireAPI.stopHpcJobOpenAPI(t, params.job_id!)
+              await InspireAPI.stopHpcJob(t, params.job_id!)
+              break
             case "inference":
-              return InspireAPI.stopInferenceOpenAPI(t, params.job_id!)
+              await InspireAPI.stopInference(t, params.job_id!)
+              break
             default:
-              return InspireAPI.stopJobOpenAPI(t, params.job_id!)
+              await InspireAPI.stopJob(t, params.job_id!)
           }
         })
         const typeLabel = type === "hpc" ? "HPC 任务" : type === "inference" ? "推理服务" : "任务"
@@ -108,7 +101,7 @@ export const inspireStop = tool({
       const ws = wsResult.ws
 
       const statusFilter = params.status ?? "running"
-      const { jobs } = await InspireAuth.withCookieRetry((cookie) => InspireAPI.listJobsWithCookie(cookie, ws.id))
+      const { jobs } = await InspireAuth.withTokenRetry((t) => InspireAPI.listJobs(t, ws.id))
 
       let projectFilter: { id: string } | undefined
       if (params.project) {
@@ -116,7 +109,7 @@ export const inspireStop = tool({
         if (resolved) projectFilter = { id: resolved.id }
       }
 
-      const matching = jobs.filter((job) => {
+      const matching = jobs.filter((job: any) => {
         const normalized = InspireNormalize.status(job.status ?? "")
         if (statusFilter === "all") return !normalized.is_terminal
         if (normalized.family !== statusFilter) return false
@@ -138,14 +131,16 @@ export const inspireStop = tool({
         const jobName = job.name ?? jobId
         try {
           const type = classifyJobId(jobId)
-          await InspireAuth.withTokenRetry((t) => {
+          await InspireAuth.withTokenRetry(async (t) => {
             switch (type) {
               case "hpc":
-                return InspireAPI.stopHpcJobOpenAPI(t, jobId)
+                await InspireAPI.stopHpcJob(t, jobId)
+                break
               case "inference":
-                return InspireAPI.stopInferenceOpenAPI(t, jobId)
+                await InspireAPI.stopInference(t, jobId)
+                break
               default:
-                return InspireAPI.stopJobOpenAPI(t, jobId)
+                await InspireAPI.stopJob(t, jobId)
             }
           })
           results.push({ name: jobName, id: jobId, success: true })

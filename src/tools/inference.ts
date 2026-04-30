@@ -116,7 +116,7 @@ async function handleCreate(params: any) {
 
   const specId = params.spec
   if (!specId) {
-    return specNotFoundError(ws.id, cg.id, cg.name)
+    return specNotFoundError(ws.id, cg.id, cg.name, "SCHEDULE_CONFIG_TYPE_SERVING")
   }
 
   const projects = await InspireCache.getProjects()
@@ -153,7 +153,7 @@ async function handleCreate(params: any) {
   let result: any
   try {
     result = await InspireAuth.withTokenRetry((t) =>
-      InspireAPI.createInferenceOpenAPI(t, {
+      InspireAPI.createInference(t, {
         name: params.name!,
         workspace_id: ws.id,
         project_id: proj.id,
@@ -240,7 +240,7 @@ async function handleDetail(params: any) {
 
   let serving: any
   try {
-    serving = await InspireAuth.withTokenRetry((t) => InspireAPI.getInferenceDetailOpenAPI(t, params.serving_id!))
+    serving = await InspireAuth.withTokenRetry((t) => InspireAPI.getInferenceDetail(t, params.serving_id!))
   } catch (err: any) {
     return {
       title: "查询失败",
@@ -326,7 +326,7 @@ async function handleStop(params: any) {
   }
 
   try {
-    await InspireAuth.withTokenRetry((t) => InspireAPI.stopInferenceOpenAPI(t, params.serving_id!))
+    await InspireAuth.withTokenRetry((t) => InspireAPI.stopInference(t, params.serving_id!))
     return {
       title: `已停止 ${params.serving_id}`,
       output: `✅ 推理服务 ${params.serving_id} 已停止`,

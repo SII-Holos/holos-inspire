@@ -1,8 +1,48 @@
 import { InspireTypes } from "./types"
 import { InspireAuth } from "./auth"
-import { InspireNormalize } from "./normalize"
 
 export namespace InspireAPI {
+
+  // ── v2 request infrastructure ──────────────────────────────────
+
+  const V2_HEADERS: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "x-inspire-client-source": "inspire-cli/5294f02",
+  }
+
+  async function postV2<T = any>(
+    service: string,
+    action: string,
+    body: Record<string, any>,
+    token: string,
+  ): Promise<T> {
+    const url = `${InspireTypes.PLATFORM_URL}/api/v2/${service}?Action=${action}`
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { ...V2_HEADERS, Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    if (resp.status === 401 || resp.status === 302) {
+      throw Object.assign(new Error("Authentication expired"), { code: -1, status: resp.status })
+    }
+    if (resp.status === 403) {
+      const errData = await resp.json().catch(() => ({}))
+      throw new Error(errData.message ?? `AccessForbidden`)
+    }
+    const data = await resp.json().catch(async () => {
+      throw new Error(`API returned non-JSON (HTTP ${resp.status})`)
+    })
+    const metadata = data.ResponseMetadata
+    if (metadata?.Error) {
+      throw Object.assign(new Error(metadata.Error.Message ?? metadata.Error.Code ?? `API error`), {
+        code: metadata.Error.Code,
+      })
+    }
+    return data.Result ?? data.data ?? data
+  }
+
+  // ── v1 cookie fallback (for endpoints without v2 coverage) ─────
 
   function cookieHeaders(cookie: string, workspaceId?: string): Record<string, string> {
     return {
@@ -12,32 +52,6 @@ export namespace InspireAPI {
         ? `${InspireTypes.PLATFORM_URL}/jobs/spacesOverview?spaceId=${workspaceId}`
         : `${InspireTypes.PLATFORM_URL}/`,
     }
-  }
-
-  async function postOpenAPI<T = any>(endpoint: string, body: Record<string, any>, token: string): Promise<T> {
-    const resp = await fetch(`${InspireTypes.PLATFORM_URL}${endpoint}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    const text = await resp.text()
-    let data: any
-    try {
-      data = JSON.parse(text)
-    } catch {
-      if (resp.status === 401 || resp.status === 302) {
-        throw Object.assign(new Error("Authentication expired or invalid"), { code: -1, status: resp.status })
-      }
-      throw Object.assign(new Error(`API returned non-JSON response (HTTP ${resp.status})`), { status: resp.status })
-    }
-    if (resp.status === 401 || data.code === -1) {
-      throw Object.assign(new Error("Authentication expired"), { code: -1, status: resp.status })
-    }
-    if (resp.status === 403 || resp.status === 302) {
-      throw new Error(data.message ?? `Permission denied (HTTP ${resp.status})`)
-    }
-    if (data.code !== 0) throw new Error(data.message ?? `API error code ${data.code}`)
-    return data.data ?? data
   }
 
   async function postInternal<T = any>(
@@ -67,28 +81,27 @@ export namespace InspireAPI {
     return data.data ?? data
   }
 
+  // ── Projects (v1 cookie — no v2 equivalent with full data) ─────
+
   export async function listProjects(cookie: string): Promise<any[]> {
     const data = await postInternal("/api/v1/project/list", { page: 1, page_size: 100, filter: {} }, cookie)
     return data.items ?? []
   }
 
-  export async function getClusterBasicInfo(cookie: string, workspaceId: string): Promise<any> {
-    return postInternal("/api/v1/cluster_metric/cluster_basic_info", { workspace_id: workspaceId }, cookie, workspaceId)
+  // ── Workspace (v2) ────────────────────────────────────────────
+
+  export async function getClusterBasicInfo(token: string, workspaceId: string): Promise<any> {
+    return postV2("workspace", "GetBasicInfo", { workspace_id: workspaceId }, token)
   }
 
   export async function listNodeDimension(
-    cookie: string,
+    token: string,
     workspaceId: string,
     computeGroupId?: string,
   ): Promise<any[]> {
     const filter: Record<string, any> = { workspace_id: workspaceId }
     if (computeGroupId) filter.logic_compute_group_id = computeGroupId
-    const data = await postInternal(
-      "/api/v1/cluster_metric/list_node_dimension",
-      { page_num: 1, page_size: 500, filter },
-      cookie,
-      workspaceId,
-    )
+    const data = await postV2("workspace", "ListNodeDimension", { filter }, token)
     return data.node_dimensions ?? []
   }
 
@@ -102,23 +115,30 @@ export namespace InspireAPI {
   }
 
   export async function listResourceSpecs(
-    cookie: string,
+    token: string,
     workspaceId: string,
     computeGroupId: string,
     scheduleType: string = "SCHEDULE_CONFIG_TYPE_TRAIN",
   ): Promise<ResourceSpec[]> {
     try {
-      const data = await postInternal(
-        "/api/v1/resource_prices/logic_compute_groups/",
-        { logic_compute_group_id: computeGroupId, workspace_id: workspaceId, schedule_config_type: scheduleType },
-        cookie,
-        workspaceId,
+      const data = await postV2(
+        "workspace",
+        "GetScheduleConfig",
+        { workspace_id: workspaceId, logic_compute_group_id: computeGroupId, schedule_config_type: scheduleType },
+        token,
       )
-      return (data.lcg_resource_spec_prices ?? []).map((s: any) => ({
-        quota_id: s.quota_id,
+
+      // quota / predef_train_spec / serving_quota are JSON strings in the response
+      const rawKey = scheduleType === "SCHEDULE_CONFIG_TYPE_TRAIN"
+        ? (data.use_predef_train_spec ? "predef_train_spec" : "quota")
+        : scheduleType === "SCHEDULE_CONFIG_TYPE_DSW" ? "quota" : "serving_quota"
+      const raw = typeof data[rawKey] === "string" ? JSON.parse(data[rawKey]) : data[rawKey] ?? []
+
+      return (Array.isArray(raw) ? raw : []).map((s: any) => ({
+        quota_id: s.id ?? s.quota_id ?? "",
         gpu_count: s.gpu_count ?? 0,
         cpu_count: s.cpu_count ?? 0,
-        memory_size_gib: s.memory_size_gib ?? 0,
+        memory_size_gib: s.memory_size ?? s.memory_size_gib ?? 0,
         total_price_per_hour: s.total_price_per_hour ?? 0,
         gpu_info: s.gpu_info,
       }))
@@ -127,9 +147,29 @@ export namespace InspireAPI {
     }
   }
 
-  export type ImageType = "SOURCE_PUBLIC" | "SOURCE_PRIVATE" | "SOURCE_OFFICIAL"
+  // ── Train (v2) ────────────────────────────────────────────────
 
-  export async function createJobOpenAPI(
+  export async function listJobs(
+    token: string,
+    workspaceId: string,
+    opts?: { pageNum?: number; pageSize?: number; createdBy?: string; status?: string },
+  ): Promise<{ jobs: any[]; total: number }> {
+    const payload: Record<string, any> = {
+      page_num: opts?.pageNum ?? 1,
+      page_size: opts?.pageSize ?? 100,
+      workspace_id: workspaceId,
+    }
+    if (opts?.createdBy) payload.created_by = opts.createdBy
+    if (opts?.status) payload.status = opts.status
+    const data = await postV2("train", "ListJobs", payload, token)
+    return { jobs: data.jobs ?? [], total: data.total ?? 0 }
+  }
+
+  export async function getJobDetail(token: string, jobId: string): Promise<any> {
+    return postV2("train", "GetJob", { job_id: jobId }, token)
+  }
+
+  export async function createJob(
     token: string,
     config: {
       name: string
@@ -170,72 +210,48 @@ export namespace InspireAPI {
     if (config.auto_fault_tolerance && config.fault_tolerance_max_retry) {
       body.fault_tolerance_max_retry = config.fault_tolerance_max_retry
     }
-    return postOpenAPI("/openapi/v1/train_job/create", body, token)
+    return postV2("train", "CreateJob", body, token)
   }
 
-  export async function getJobDetailOpenAPI(token: string, jobId: string): Promise<any> {
-    return postOpenAPI("/openapi/v1/train_job/detail", { job_id: jobId }, token)
+  export async function stopJob(token: string, jobId: string): Promise<void> {
+    await postV2("train", "StopJob", { job_id: jobId }, token)
   }
 
-  export async function stopJobOpenAPI(token: string, jobId: string): Promise<void> {
-    await postOpenAPI("/openapi/v1/train_job/stop", { job_id: jobId }, token)
+  // ── HPC (v2 for create/detail/stop, v1 cookie for list) ────────
+
+  export async function createHpcJob(token: string, config: Record<string, any>): Promise<any> {
+    return postV2("hpc", "CreateJob", config, token)
   }
 
-  // --- HPC OpenAPI ---
+  export async function getHpcJobDetail(token: string, jobId: string): Promise<any> {
+    return postV2("hpc", "GetJob", { job_id: jobId }, token)
+  }
 
-  export async function createHpcJobOpenAPI(
-    token: string,
-    config: {
-      name: string
-      workspace_id: string
-      project_id: string
-      logic_compute_group_id: string
-      entrypoint: string
-      image: string
-      image_type?: ImageType
-      instance_count: number
-      spec_id: string
-      task_priority: number
-      number_of_tasks: number
-      cpus_per_task: number
-      memory_per_cpu: string
-      enable_hyper_threading: boolean
-      ttl_after_finish_seconds?: number
-    },
-  ): Promise<any> {
-    const body: Record<string, any> = {
-      name: config.name,
-      workspace_id: config.workspace_id,
-      project_id: config.project_id,
-      logic_compute_group_id: config.logic_compute_group_id,
-      entrypoint: config.entrypoint,
-      image: config.image,
-      image_type: config.image_type ?? "SOURCE_PRIVATE",
-      instance_count: config.instance_count,
-      spec_id: config.spec_id,
-      task_priority: config.task_priority,
-      number_of_tasks: config.number_of_tasks,
-      cpus_per_task: config.cpus_per_task,
-      memory_per_cpu: config.memory_per_cpu,
-      enable_hyper_threading: config.enable_hyper_threading,
+  export async function stopHpcJob(token: string, jobId: string): Promise<void> {
+    await postV2("hpc", "StopJob", { job_id: jobId }, token)
+  }
+
+  /** v2 has no HPC ListJobs — falls back to v1 cookie path */
+  export async function listHpcJobs(
+    cookie: string,
+    workspaceId: string,
+    opts?: { status?: string; pageNum?: number; pageSize?: number },
+  ): Promise<{ jobs: any[]; total: number }> {
+    const payload: Record<string, any> = {
+      workspace_id: workspaceId,
+      page_num: opts?.pageNum ?? 1,
+      page_size: opts?.pageSize ?? 100,
     }
-    if (config.ttl_after_finish_seconds) {
-      body.ttl_after_finish_seconds = config.ttl_after_finish_seconds
-    }
-    return postOpenAPI("/openapi/v1/hpc_jobs/create", body, token)
+    if (opts?.status) payload.status = opts.status
+    const data = await postInternal("/api/v1/hpc_jobs/list", payload, cookie, workspaceId)
+    return { jobs: data.jobs ?? data.list ?? [], total: data.total ?? 0 }
   }
 
-  export async function getHpcJobDetailOpenAPI(token: string, jobId: string): Promise<any> {
-    return postOpenAPI("/openapi/v1/hpc_jobs/detail", { job_id: jobId }, token)
-  }
+  // ── Inference Serving (v2) ─────────────────────────────────────
 
-  export async function stopHpcJobOpenAPI(token: string, jobId: string): Promise<void> {
-    await postOpenAPI("/openapi/v1/hpc_jobs/stop", { job_id: jobId }, token)
-  }
+  export type ImageType = "SOURCE_PUBLIC" | "SOURCE_PRIVATE" | "SOURCE_OFFICIAL"
 
-  // --- Inference Serving OpenAPI ---
-
-  export async function createInferenceOpenAPI(
+  export async function createInference(
     token: string,
     config: {
       name: string
@@ -274,89 +290,52 @@ export namespace InspireAPI {
     if (config.custom_domain) {
       body.custom_domain = config.custom_domain
     }
-    return postOpenAPI("/openapi/v1/inference_servings/create", body, token)
+    return postV2("inference_serving", "CreateServing", body, token)
   }
 
-  export async function getInferenceDetailOpenAPI(token: string, servingId: string): Promise<any> {
-    return postOpenAPI("/openapi/v1/inference_servings/detail", { inference_serving_id: servingId }, token)
+  export async function getInferenceDetail(token: string, servingId: string): Promise<any> {
+    return postV2("inference_serving", "GetServing", { inference_serving_id: servingId }, token)
   }
 
-  export async function stopInferenceOpenAPI(token: string, servingId: string): Promise<void> {
-    await postOpenAPI("/openapi/v1/inference_servings/stop", { inference_serving_id: servingId }, token)
+  export async function stopInference(token: string, servingId: string): Promise<void> {
+    await postV2("inference_serving", "StopServing", { inference_serving_id: servingId }, token)
   }
 
-  export function extractSpecId(job: any): string | undefined {
-    const fc = job.framework_config ?? []
-    const first = fc[0] ?? {}
-    return first.instance_spec_price_info?.quota_id ?? first.spec_id ?? undefined
-  }
+  // ── Notebook (v2 for detail/operate, v1 cookie for list/create) ──
 
-  export async function createJob(cookie: string, config: Record<string, any>): Promise<any> {
-    return postInternal("/api/v1/train_job/create", config, cookie, config.workspace_id)
-  }
+  export type NotebookOperation = "START" | "STOP"
 
-  export async function getJobDetail(cookie: string, jobId: string): Promise<any> {
-    return postInternal("/api/v1/train_job/detail", { job_id: jobId }, cookie)
-  }
-
-  export async function stopJob(cookie: string, jobId: string): Promise<boolean> {
-    try {
-      await postInternal("/api/v1/train_job/stop", { job_id: jobId }, cookie)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  export async function listJobsWithCookie(
-    cookie: string,
+  export async function listNotebooks(
+    token: string,
     workspaceId: string,
-    opts?: { pageNum?: number; pageSize?: number; createdBy?: string },
-  ): Promise<{ jobs: any[]; total: number }> {
-    const payload: Record<string, any> = {
-      page_num: opts?.pageNum ?? 1,
-      page_size: opts?.pageSize ?? 100,
+    opts?: { page?: number; pageSize?: number },
+  ): Promise<{ items: any[]; total: number }> {
+    const data = await postV2("notebook", "ListNotebooks", {
       workspace_id: workspaceId,
-    }
-    if (opts?.createdBy) payload.created_by = opts.createdBy
-    const data = await postInternal("/api/v1/train_job/list", payload, cookie, workspaceId)
-    return { jobs: data.jobs ?? data.list ?? [], total: data.total ?? 0 }
-  }
-
-  export async function listHpcJobs(
-    cookie: string,
-    workspaceId: string,
-    opts?: { status?: string; pageNum?: number; pageSize?: number },
-  ): Promise<{ jobs: any[]; total: number }> {
-    const payload: Record<string, any> = {
-      workspace_id: workspaceId,
-      page_num: opts?.pageNum ?? 1,
       page_size: opts?.pageSize ?? 100,
-    }
-    if (opts?.status) payload.status = opts.status
-    const data = await postInternal("/api/v1/hpc_jobs/list", payload, cookie, workspaceId)
-    return { jobs: data.jobs ?? data.list ?? [], total: data.total ?? 0 }
+      page: opts?.page ?? 1,
+    }, token)
+    return { items: data.list ?? [], total: data.total ?? 0 }
   }
 
-  export async function createHpcJob(cookie: string, config: Record<string, any>): Promise<any> {
-    return postInternal("/api/v1/hpc_jobs", config, cookie)
+  export async function getNotebookDetail(token: string, notebookId: string): Promise<any> {
+    return postV2("notebook", "GetNotebook", { notebook_id: notebookId }, token)
   }
 
-  export function extractGpuInfo(job: any): { gpu_count: number; instance_count: number; image: string } {
-    const fc = job.framework_config ?? []
-    const first = fc[0] ?? {}
-    return {
-      gpu_count: first.instance_spec_price_info?.gpu_count ?? 0,
-      instance_count: first.instance_count ?? 1,
-      image: first.image ?? "",
-    }
+  export async function operateNotebook(
+    token: string,
+    notebookId: string,
+    operation: NotebookOperation,
+  ): Promise<void> {
+    const action = operation === "START" ? "StartNotebook" : "StopNotebook"
+    await postV2("notebook", action, { notebook_id: notebookId }, token)
   }
 
-  export function buildJobUrl(jobId: string, workspaceId: string, type: "gpu" | "hpc" | "inference" = "gpu"): string {
-    if (type === "hpc") return `${InspireTypes.PLATFORM_URL}/jobs/hpc?spaceId=${workspaceId}`
-    if (type === "inference") return `${InspireTypes.PLATFORM_URL}/deploy/inference?spaceId=${workspaceId}`
-    return `${InspireTypes.PLATFORM_URL}/jobs/distributedTrainingDetail/${jobId}?spaceId=${workspaceId}`
+  export async function createNotebook(cookie: string, config: Record<string, any>): Promise<any> {
+    return postInternal("/api/v1/notebook/create", config, cookie, config.workspace_id)
   }
+
+  // ── Logs & Metrics (v2) ───────────────────────────────────────
 
   export interface TrainLogEntry {
     log_id: string
@@ -369,7 +348,7 @@ export namespace InspireAPI {
   }
 
   export async function getTrainLogs(
-    cookie: string,
+    token: string,
     opts: {
       jobId: string
       instanceCount?: number
@@ -397,7 +376,7 @@ export namespace InspireAPI {
       ],
     }
 
-    const data = await postInternal("/api/v1/logs/train", body, cookie)
+    const data = await postV2("train", "GetJobLog", body, token)
     return { logs: data.logs ?? [], total: data.total ?? 0 }
   }
 
@@ -421,7 +400,7 @@ export namespace InspireAPI {
   }
 
   export async function getClusterMetrics(
-    cookie: string,
+    token: string,
     opts: {
       computeGroupId: string
       taskId: string
@@ -450,73 +429,11 @@ export namespace InspireAPI {
       },
     }
 
-    const data = await postInternal("/api/v1/cluster_metric/resource_metric_by_time", body, cookie)
-    return data.time_seris_metric_groups ?? []
+    const data = await postV2("train", "GetTaskMetric", body, token)
+    return data.time_seris_metric_groups ?? data.time_series_metric_groups ?? []
   }
 
-  // --- Notebook ---
-
-  export type NotebookOperation = "START" | "STOP"
-
-  export async function listNotebooks(
-    cookie: string,
-    workspaceId: string,
-    opts?: { page?: number; pageSize?: number },
-  ): Promise<{ items: any[]; total: number }> {
-    const body: Record<string, any> = {
-      workspace_id: workspaceId,
-      page_size: opts?.pageSize ?? 100,
-      page: opts?.page ?? 1,
-    }
-    const data = await postInternal("/api/v1/notebook/list", body, cookie, workspaceId)
-    return { items: data.list ?? [], total: data.total ?? 0 }
-  }
-
-  export async function listPlatformImages(
-    cookie: string,
-    workspaceId: string,
-    opts?: { search?: string; imageType?: string },
-  ): Promise<{ images: any[]; total: number }> {
-    const filter: Record<string, any> = {
-      registry_hint: { workspace_id: workspaceId },
-    }
-    if (opts?.imageType) filter.source = opts.imageType
-    const payload: Record<string, any> = {
-      page_size: -1,
-      page: 0,
-      filter,
-    }
-    const data = await postInternal("/api/v1/image/list", payload, cookie, workspaceId)
-    return { images: data.images ?? [], total: data.total ?? 0 }
-  }
-
-  export async function getNotebookDetail(cookie: string, notebookId: string): Promise<any> {
-    const resp = await fetch(`${InspireTypes.PLATFORM_URL}/api/v1/notebook/${notebookId}`, {
-      headers: cookieHeaders(cookie),
-    })
-    if (resp.status === 401) throw Object.assign(new Error("Session expired"), { status: 401 })
-    const data = (await resp.json()) as any
-    if (data.code !== 0) throw new Error(data.message ?? `API error code ${data.code}`)
-    return data.data
-  }
-
-  export async function operateNotebook(
-    cookie: string,
-    notebookId: string,
-    operation: NotebookOperation,
-  ): Promise<void> {
-    await postInternal("/api/v1/notebook/operate", { notebook_id: notebookId, operation }, cookie)
-  }
-
-  export async function createNotebook(cookie: string, config: Record<string, any>): Promise<any> {
-    return postInternal("/api/v1/notebook/create", config, cookie, config.workspace_id)
-  }
-
-  export function buildNotebookUrl(notebookId: string, workspaceId: string): string {
-    return `${InspireTypes.PLATFORM_URL}/develop/notebook/${notebookId}?spaceId=${workspaceId}`
-  }
-
-  // --- Model ---
+  // ── Model (v1 cookie — no v2 model service) ────────────────────
 
   export async function listModels(
     cookie: string,
@@ -543,5 +460,53 @@ export namespace InspireAPI {
 
   export async function deleteModel(cookie: string, modelId: string): Promise<void> {
     await postInternal("/api/v1/model/delete", { model_id: modelId }, cookie)
+  }
+
+  // ── Image (v1 cookie — v2 returns AccessForbidden) ─────────────
+
+  export async function listPlatformImages(
+    cookie: string,
+    workspaceId: string,
+    opts?: { search?: string; imageType?: string },
+  ): Promise<{ images: any[]; total: number }> {
+    const filter: Record<string, any> = {
+      registry_hint: { workspace_id: workspaceId },
+    }
+    if (opts?.imageType) filter.source = opts.imageType
+    const payload: Record<string, any> = {
+      page_size: -1,
+      page: 0,
+      filter,
+    }
+    const data = await postInternal("/api/v1/image/list", payload, cookie, workspaceId)
+    return { images: data.images ?? [], total: data.total ?? 0 }
+  }
+
+  // ── Utility helpers ────────────────────────────────────────────
+
+  export function extractSpecId(job: any): string | undefined {
+    const fc = job.framework_config ?? []
+    const first = fc[0] ?? {}
+    return first.instance_spec_price_info?.quota_id ?? first.spec_id ?? undefined
+  }
+
+  export function extractGpuInfo(job: any): { gpu_count: number; instance_count: number; image: string } {
+    const fc = job.framework_config ?? []
+    const first = fc[0] ?? {}
+    return {
+      gpu_count: first.instance_spec_price_info?.gpu_count ?? first.gpu_count ?? 0,
+      instance_count: first.instance_count ?? 1,
+      image: first.image ?? "",
+    }
+  }
+
+  export function buildJobUrl(jobId: string, workspaceId: string, type: "gpu" | "hpc" | "inference" = "gpu"): string {
+    if (type === "hpc") return `${InspireTypes.PLATFORM_URL}/jobs/hpc?spaceId=${workspaceId}`
+    if (type === "inference") return `${InspireTypes.PLATFORM_URL}/deploy/inference?spaceId=${workspaceId}`
+    return `${InspireTypes.PLATFORM_URL}/jobs/distributedTrainingDetail/${jobId}?spaceId=${workspaceId}`
+  }
+
+  export function buildNotebookUrl(notebookId: string, workspaceId: string): string {
+    return `${InspireTypes.PLATFORM_URL}/develop/notebook/${notebookId}?spaceId=${workspaceId}`
   }
 }
