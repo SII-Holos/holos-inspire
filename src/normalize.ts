@@ -2,10 +2,10 @@ import type { InspireTypes } from "./types"
 
 const FAMILY_RULES: Array<{ family: InspireTypes.StatusFamily["family"]; tokens: string[] }> = [
   { family: "running", tokens: ["running", "executing", "active", "serving", "training", "processing"] },
-  {
-    family: "waiting",
-    tokens: ["queue", "queued", "queuing", "pending", "waiting", "scheduling", "creating", "starting"],
-  },
+  { family: "creating", tokens: ["creating"] },
+  { family: "starting", tokens: ["starting"] },
+  { family: "stopping", tokens: ["stopping"] },
+  { family: "waiting", tokens: ["queue", "queued", "queuing", "pending", "waiting", "scheduling"] },
   { family: "succeeded", tokens: ["success", "succeeded", "complete", "completed", "finish", "finished", "done"] },
   { family: "failed", tokens: ["fail", "failed", "error", "exception", "killed", "crash"] },
   { family: "stopped", tokens: ["stop", "stopped", "cancel", "cancelled", "canceled", "terminate", "terminated"] },
@@ -23,7 +23,24 @@ const V2_STATUS_MAP: Record<number, string> = {
   8: "queued",
 }
 
+/**
+ * Notebook (DSW) numeric status codes.
+ * NOTE: Notebooks use a DIFFERENT numeric encoding than HPC/Inference.
+ * Derived from API observation:
+ *   2 = starting, 3 = running, 5 = stopped
+ */
+const NOTEBOOK_STATUS_MAP: Record<number, string> = {
+  0: "creating",
+  1: "creating",
+  2: "starting",
+  3: "running",
+  4: "stopping",
+  5: "stopped",
+  6: "failed",
+}
+
 export namespace InspireNormalize {
+  /** Generic status normalization (for HPC/Inference/training jobs). */
   export function status(raw: any): InspireTypes.StatusFamily {
     // Handle v2 numeric status codes first
     if (typeof raw === "number") {
@@ -33,6 +50,23 @@ export namespace InspireNormalize {
     // Handle objects that may contain a numeric status field
     if (raw && typeof raw === "object" && typeof raw.status === "number") {
       const label = V2_STATUS_MAP[raw.status] ?? String(raw.status)
+      return statusFromToken(label, raw.status)
+    }
+    const str = typeof raw === "string" ? raw : String(raw ?? "")
+    return statusFromToken(str, raw)
+  }
+
+  /**
+   * Notebook-specific status normalization.
+   * Notebooks use a DIFFERENT numeric encoding than other v2 APIs.
+   */
+  export function notebookStatus(raw: any): InspireTypes.StatusFamily {
+    if (typeof raw === "number") {
+      const label = NOTEBOOK_STATUS_MAP[raw] ?? `unknown(${raw})`
+      return statusFromToken(label, raw)
+    }
+    if (raw && typeof raw === "object" && typeof raw.status === "number") {
+      const label = NOTEBOOK_STATUS_MAP[raw.status] ?? `unknown(${raw.status})`
       return statusFromToken(label, raw.status)
     }
     const str = typeof raw === "string" ? raw : String(raw ?? "")

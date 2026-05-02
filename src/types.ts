@@ -51,7 +51,7 @@ export namespace InspireTypes {
   }
 
   export interface StatusFamily {
-    family: "running" | "waiting" | "succeeded" | "failed" | "stopped" | "unknown"
+    family: "running" | "waiting" | "creating" | "starting" | "stopping" | "succeeded" | "failed" | "stopped" | "unknown"
     is_terminal: boolean
     raw: string
   }

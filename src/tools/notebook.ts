@@ -93,7 +93,7 @@ async function handleList(params: any) {
 
   for (let i = 0; i < filtered.length; i++) {
     const nb = filtered[i]
-    const statusInfo = InspireNormalize.status(nb.status ?? "")
+    const statusInfo = InspireNormalize.notebookStatus(nb.status ?? "")
     const label = STATUS_LABELS[statusInfo.family] ?? statusInfo.raw
     const gpuInfo = nb.node?.gpu_info
     const gpuType = gpuInfo
@@ -143,7 +143,7 @@ async function handleDetail(params: any) {
     }
   }
 
-  const statusInfo = InspireNormalize.status(nb.status ?? "")
+  const statusInfo = InspireNormalize.notebookStatus(nb.status ?? "")
   const createdAt = InspireNormalize.formatTimestamp(nb.created_at)
   const url = InspireAPI.buildNotebookUrl(nb.notebook_id ?? params.notebook_id, nb.workspace_id ?? nb.workspace?.id)
   const label = STATUS_LABELS[statusInfo.family] ?? statusInfo.raw

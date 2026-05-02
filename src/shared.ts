@@ -13,6 +13,9 @@ export async function requireAuth(): Promise<InspireTypes.ToolResult | null> {
 export const STATUS_LABELS: Record<string, string> = {
   running: "运行中",
   waiting: "排队中",
+  creating: "创建中",
+  starting: "启动中",
+  stopping: "停止中",
   succeeded: "成功",
   failed: "失败",
   stopped: "已停止",
