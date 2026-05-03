@@ -55,7 +55,7 @@ export const inspireConfig = tool({
     value: z
       .union([z.string(), z.number()])
       .optional()
-      .describe("Value to set (required for 'set'). Use empty string to clear a default"),
+      .describe('Value to set (required for "set"). Pass empty string "" or omit entirely to clear a default'),
   },
   async execute(params, ctx) {
     const sii = await pluginConfig().get()
@@ -119,18 +119,22 @@ export const inspireConfig = tool({
       }
 
       const key = params.key as ConfigKey
-      const value = params.value === "" ? undefined : params.value
+      const isClear = params.value === undefined || params.value === ""
+      // Explicitly write "" (not undefined) to clear — pluginConfig.set uses
+      // merge semantics, so undefined fields are ignored and the previous
+      // value would be retained.
+      const storedValue: string | number = isClear ? "" : params.value!
 
-      await pluginConfig().set({ ...sii, [key]: value })
+      await pluginConfig().set({ ...sii, [key]: storedValue })
 
-      const displayValue = value === undefined ? "(已清除)" : String(value)
+      const displayValue = isClear ? "(已清除)" : String(storedValue)
       const lines = [`✅ 已设置 ${key} = ${displayValue}`, "", `说明: ${KEY_DESCRIPTIONS[key]}`]
 
-      if (key === "commandPrefix" && value) {
+      if (key === "commandPrefix" && !isClear) {
         lines.push("")
         lines.push("效果: 后续 inspire_submit 的 command 参数将自动拼接此前缀。")
         lines.push('例如 command="python train.py" 实际执行:')
-        lines.push(`  ${value} && python train.py`)
+        lines.push(`  ${storedValue} && python train.py`)
       }
 
       return {
