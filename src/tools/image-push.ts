@@ -11,7 +11,7 @@ Why this tool instead of bash docker push:
 - Handles the inspire-studio/ project path prefix automatically
 - Returns the display-domain address (docker.sii.shaipower.online) needed by inspire_submit and inspire_notebook
 - Provides the exact 镜像名称 and 版本号 values needed for platform registration after push
-- Falls back automatically across docker → podman → buildah → skopeo if the primary tool is unavailable
+- Falls back automatically across docker → podman → buildah → skopeo if the primary tool is unavailable or can't see the image
 
 Running docker push via bash will fail without Harbor authentication and will not guide the user through the required registration step.
 
@@ -22,6 +22,8 @@ Two registries:
 Prerequisites: at least one of docker / podman / buildah / skopeo installed locally, insecure-registry configured if the tool requires it, VPN or campus network.
 
 After pushing, the user MUST register the image on the platform (镜像管理 → 新建镜像) with the 镜像名称 and 版本号 shown in the output. Without registration, the image cannot be used for task submission or notebook creation.`
+
+const PLATFORM_URL = "https://qz.sii.edu.cn"
 
 export const inspireImagePush = tool({
   description: DESCRIPTION,
@@ -41,27 +43,17 @@ export const inspireImagePush = tool({
     description: z
       .string()
       .optional()
-      .describe(
-        "镜像描述（如 'PyTorch 2.9 + CUDA 12.8 + DeepSpeed'）。首次推送时设置，方便后续识别",
-      ),
+      .describe("镜像描述（如 'PyTorch 2.9 + CUDA 12.8 + DeepSpeed'）。首次推送时设置，方便后续识别"),
   },
-  async execute(params, ctx) {
+  async execute(params): Promise<InspireTypes.ToolResult> {
+    const colonIdx = params.image.lastIndexOf(":")
+    const parsedName = colonIdx > 0 ? params.image.slice(0, colonIdx) : params.image
+    const parsedTag = colonIdx > 0 ? params.image.slice(colonIdx + 1) : "latest"
+    const remoteName = params.name ?? parsedName
+    const remoteTag = params.tag ?? parsedTag
+    const target = params.registry ?? "qb"
+
     try {
-      const colonIdx = params.image.lastIndexOf(":")
-      let parsedName: string
-      let parsedTag: string
-      if (colonIdx > 0) {
-        parsedName = params.image.slice(0, colonIdx)
-        parsedTag = params.image.slice(colonIdx + 1)
-      } else {
-        parsedName = params.image
-        parsedTag = "latest"
-      }
-
-      const remoteName = params.name ?? parsedName
-      const remoteTag = params.tag ?? parsedTag
-      const target = params.registry ?? "qb"
-
       const result = await InspireHarbor.pushImage({
         localImage: params.image,
         remoteName,
@@ -77,11 +69,16 @@ export const inspireImagePush = tool({
         } catch {}
       }
 
-      // Build display domain address (replace push domain with display domain)
       const displayDomain = target === "sj" ? "docker-t.sii.shaipower.online" : "docker.sii.shaipower.online"
       const displayPath = result.fullPath.replace(/^[^/]+/, displayDomain)
 
-      const lines = ["=== 镜像推送成功 ===", "", `推送工具: ${result.tool}`, `推送地址: ${result.fullPath}`, `使用地址: ${displayPath}`]
+      const lines = [
+        "=== 镜像推送成功 ===",
+        "",
+        `推送工具: ${result.tool}`,
+        `推送地址: ${result.fullPath}`,
+        `使用地址: ${displayPath}`,
+      ]
       if (result.warnedDuplicatePath) {
         lines.push("⚠ name 参数包含了项目前缀（如 inspire-studio/），已自动去除。下次直接用镜像名称即可，如 'faro-postgres' 而非 'inspire-studio/faro-postgres'")
       }
@@ -101,98 +98,225 @@ export const inspireImagePush = tool({
       return {
         title: `pushed ${result.fullPath}`,
         output: lines.join("\n"),
-        metadata: { fullPath: result.fullPath, digest: result.digest, remoteName, remoteTag },
+        metadata: {
+          fullPath: result.fullPath,
+          digest: result.digest,
+          remoteName,
+          remoteTag,
+          tool: result.tool,
+        },
       }
-    } catch (err: any) {
-      const msg = String(err?.message ?? err ?? "")
-
-      if (msg.includes("harbor_not_authenticated") || msg.includes("not authenticated")) {
-        return InspireAuth.notAuthenticatedError("harbor")
-      }
-      if (msg.includes("no_push_tool")) {
-        return {
-          title: "无可用推送工具",
-          output: [
-            "本地未找到任何可用的容器工具。推送需要以下任一工具：",
-            "",
-            "  • docker  — 最常见；需要 Docker daemon 运行",
-            "  • podman  — 与 docker CLI 兼容，无需 daemon（推荐研究集群环境）",
-            "  • buildah — 与 buildah bud 构建配合使用（image-build.txt 推荐的 build fallback）",
-            "  • skopeo  — 最灵活，可从 containers-storage / docker-daemon 读源",
-            "",
-            "快速安装建议：",
-            "  Ubuntu/Debian: apt install podman buildah skopeo",
-            "  CentOS/RHEL:   dnf install podman buildah skopeo",
-            "",
-            "临时方案：用 docker/podman save 导出 .tar 文件，在平台页面手动上传。",
-          ].join("\n"),
-          metadata: { error: "no_push_tool" },
-        }
-      }
-      if (msg.includes("all_push_tools_failed")) {
-        return {
-          title: "推送失败",
-          output: [
-            "已尝试所有可用的容器工具（docker/podman/buildah/skopeo），但都失败了。",
-            "",
-            msg,
-            "",
-            "常见原因：",
-            "  1. 镜像不在尝试工具的 storage 里（如用 docker build 的镜像不在 buildah/skopeo 的 containers-storage 里）",
-            "  2. Harbor 服务不可达（检查 VPN / 校园网）",
-            "  3. Robot 账号无推送权限",
-            "",
-            "排查：先用 `docker images` / `buildah images` / `podman images` 确认镜像存在于哪个 storage 中。",
-          ].join("\n"),
-          metadata: { error: "all_push_tools_failed" },
-        }
-      }
-      if (msg.includes("not installed") || msg.includes("not in PATH")) {
-        // Legacy error path — shouldn't happen with new fallback logic
-        return {
-          title: "容器工具未安装",
-          output: "本地未安装 docker/podman/buildah/skopeo 中的任何一个。请至少安装其中之一。",
-          metadata: { error: "no_push_tool" },
-        }
-      }
-      if (msg.includes("No such image") || msg.includes("not found locally")) {
-        return {
-          title: "镜像未找到",
-          output: `本地找不到镜像 '${params.image}'。可通过 bash 执行 \`docker images\` 查看本地可用镜像。`,
-          metadata: { error: "image_not_found", image: params.image },
-        }
-      }
-      if (
-        msg.includes("network") ||
-        msg.includes("timeout") ||
-        msg.includes("ETIMEDOUT") ||
-        msg.includes("connection refused")
-      ) {
-        return {
-          title: "推送失败",
-          output: "推送失败，请确认处于 VPN 或校园网环境。",
-          metadata: { error: "network_error" },
-        }
-      }
-      if (msg.includes("unavailable") || msg.includes("unknown error") || msg.includes("error from registry")) {
-        const remoteName = params.name ?? params.image.split(":")[0]
-        return {
-          title: "推送失败",
-          output: [
-            "推送失败，Harbor 返回 Unavailable 或 unknown error。可能原因：",
-            "",
-            "1. Robot 账号没有 push 到该仓库的权限——检查账号权限范围",
-            "2. Harbor 服务暂时不可用——稍后重试",
-            "3. 网络不稳定——确认 VPN 或校园网连接正常",
-            "",
-            "提示：Harbor 支持自动创建仓库，无需预先创建。如持续失败，请联系平台管理员。",
-            "临时方案：用 docker save 导出 .tar 文件，在平台页面手动上传。",
-          ].join("\n"),
-          metadata: { error: "harbor_unavailable", remoteName },
-        }
-      }
-
+    } catch (err) {
+      if (err instanceof InspireHarbor.PushError) return renderPushError(err, target)
+      const msg = String((err as Error)?.message ?? err ?? "")
+      if (msg.startsWith("harbor_not_authenticated")) return InspireAuth.notAuthenticatedError("harbor")
+      if (msg === "no_push_tool") return renderNoPushTool()
       throw err
     }
   },
 })
+
+function renderNoPushTool(): InspireTypes.ToolResult {
+  return {
+    title: "无可用推送工具",
+    output: [
+      "本地未找到任何容器工具。推送需要以下任一：",
+      "",
+      "  • docker  — 最常见；需要 Docker daemon 运行",
+      "  • podman  — 与 docker CLI 兼容，无需 daemon（推荐研究集群环境）",
+      "  • buildah — 与 buildah bud 配合使用（image-build.txt 推荐的 build fallback）",
+      "  • skopeo  — 最灵活，可读 containers-storage / docker-daemon / .tar 等多种源",
+      "",
+      "安装建议（任一即可）:",
+      "  Ubuntu/Debian: sudo apt install podman buildah skopeo",
+      "  CentOS/RHEL:   sudo dnf install podman buildah skopeo",
+      "",
+      "临时方案: docker/podman save -o image.tar → 平台 UI「镜像管理 → 本地推送 → 上传 tar」",
+    ].join("\n"),
+    metadata: { error: "no_push_tool" },
+  }
+}
+
+function renderPushError(err: InspireHarbor.PushError, target: InspireTypes.HarborTarget): InspireTypes.ToolResult {
+  const { kind, tool, raw, context } = err
+  const image = context.image ?? ""
+  const registry = context.registry ?? ""
+  const fullPath = context.fullPath ?? ""
+  const attempts = context.attempts ?? [err]
+  const imageBase = image.includes(":") ? image.slice(0, image.lastIndexOf(":")) : image
+  const repoPath = fullPath.split(":")[0]
+
+  const attemptsBlock =
+    attempts.length > 1
+      ? "\n尝试过的工具:\n" +
+        attempts
+          .map((a) => `  [${a.tool}] ${a.kind}: ${a.raw.slice(0, 200).replace(/\s+/g, " ").trim()}`)
+          .join("\n")
+      : ""
+  const attemptsMeta = attempts.map((a) => ({ tool: a.tool, kind: a.kind, raw: a.raw.slice(0, 300) }))
+  const short = (s: string, n = 300) => s.slice(0, n)
+
+  switch (kind) {
+    case "auth_failed":
+      return {
+        title: "Harbor 凭据失效",
+        output: [
+          `❌ Harbor 拒绝凭据（工具 [${tool}]）。`,
+          "",
+          "启智平台 Harbor 账号和平台账号是分开的；密码来自「镜像管理 → 本地推送」页面。",
+          "",
+          "下一步:",
+          `  1. 打开 ${PLATFORM_URL} → 镜像管理 → 本地推送`,
+          "  2. 复制 Robot 账号的 username 和 password",
+          `  3. 运行 inspire_login(target="harbor", username="...", password="...", registry="${target}")`,
+          "  4. 重试 inspire_image_push",
+          "",
+          `原始错误: ${short(raw)}`,
+        ].join("\n"),
+        metadata: { error: "auth_failed", tool, registry: target, attempts: attemptsMeta },
+      }
+
+    case "permission_denied":
+      return {
+        title: "无推送权限",
+        output: [
+          `❌ Harbor 拒绝 push 到 ${fullPath}，Robot 账号无权限（工具 [${tool}]）。`,
+          "",
+          "可能原因:",
+          `  - Robot 账号 scope 未包含 ${repoPath}`,
+          "  - 平台升级后权限被重置",
+          "",
+          "下一步:",
+          "  - 联系平台管理员扩展 Robot 账号权限",
+          "  - 临时方案: docker save -o image.tar → 平台 UI「镜像管理 → 本地推送」上传 tar",
+          "",
+          `原始错误: ${short(raw)}`,
+        ].join("\n"),
+        metadata: { error: "permission_denied", fullPath, tool, attempts: attemptsMeta },
+      }
+
+    case "image_missing":
+      return {
+        title: "镜像未找到",
+        output: [
+          `❌ 所有容器工具都找不到镜像 '${image}'。`,
+          "",
+          "工具间的 image storage 是隔离的:",
+          "  - docker build 的镜像 → /var/lib/docker（仅 docker 可见）",
+          "  - buildah bud / podman build → containers-storage（buildah/podman/skopeo 共享）",
+          "",
+          "排查:",
+          `  1. bash: docker images | grep ${imageBase}`,
+          `  2. bash: podman images | grep ${imageBase}    # 或 buildah images`,
+          "",
+          "解决:",
+          "  - 镜像在 docker 但其他工具看不到 → 启动 dockerd；或 docker save <img> -o /tmp/img.tar && podman load -i /tmp/img.tar",
+          "  - 镜像根本不存在 → 重新构建（参考 image-build.txt）",
+          attemptsBlock,
+        ].join("\n"),
+        metadata: { error: "image_missing", image, attempts: attemptsMeta },
+      }
+
+    case "daemon_down":
+      return {
+        title: "Docker daemon 未运行",
+        output: [
+          "❌ Docker daemon 不可用，其他工具（podman/buildah/skopeo）也未能读到该镜像。",
+          "",
+          "通常意味着镜像只存在于 Docker daemon storage，而 daemon 没启动——其他工具无法访问。",
+          "",
+          "解决:",
+          "  - 启动 daemon: sudo systemctl start docker （或 sudo dockerd &）",
+          "  - 或改用 podman/buildah 重新构建到 containers-storage",
+          attemptsBlock,
+        ].join("\n"),
+        metadata: { error: "daemon_down", attempts: attemptsMeta },
+      }
+
+    case "network":
+      return {
+        title: "网络不通",
+        output: [
+          `❌ 无法连接到 Harbor${registry ? ` (${registry})` : ""}。`,
+          "",
+          "可能原因:",
+          "  1. 未连 VPN（aTrust）或不在校园网",
+          "  2. DNS 解析失败（校内域名 DNS 需设为 10.11.26.11）",
+          "  3. 防火墙拦截",
+          "",
+          `验证: curl -v https://${registry || "docker-qb.sii.edu.cn"}/v2/`,
+          "",
+          `原始错误: ${short(raw)}`,
+        ].join("\n"),
+        metadata: { error: "network", registry, attempts: attemptsMeta },
+      }
+
+    case "harbor_unavailable":
+      return {
+        title: "Harbor 服务不可用",
+        output: [
+          `❌ Harbor 返回 5xx / Unavailable（工具 [${tool}]）。`,
+          "",
+          "服务端问题，稍后重试。如持续 15 分钟以上，联系平台管理员。",
+          "",
+          `原始错误: ${short(raw)}`,
+        ].join("\n"),
+        metadata: { error: "harbor_unavailable", tool, attempts: attemptsMeta },
+      }
+
+    case "size_limit":
+      return {
+        title: "镜像过大",
+        output: [
+          "❌ 镜像超过 Harbor 的大小限制。",
+          "",
+          "减小策略:",
+          "  - 用 -runtime 基础镜像替代 -devel（省 ~2GB）",
+          "  - apt clean && pip cache purge && rm -rf ~/.cache 后再 commit",
+          "  - 多阶段构建：builder stage 装编译依赖，final stage 只 COPY 产物",
+          "  - 拆分为多个镜像：模型权重 / 代码 / 依赖分离",
+          "",
+          "参考: skills/sii-inspire/references/image-build.txt「Image size」一节",
+          "",
+          `原始错误: ${short(raw)}`,
+        ].join("\n"),
+        metadata: { error: "size_limit", attempts: attemptsMeta },
+      }
+
+    case "tls":
+      return {
+        title: "TLS / 证书错误",
+        output: [
+          `❌ 无法建立 HTTPS 连接到 ${registry}（证书或协议错误）。`,
+          "",
+          "通常是 daemon 没配 insecure-registry 或缺少 CA 证书。",
+          "",
+          "修复:",
+          "  docker: /etc/docker/daemon.json 加",
+          `    { "insecure-registries": ["${registry}"] }`,
+          "    然后 sudo systemctl restart docker",
+          "  podman: /etc/containers/registries.conf 加 [[registry]] 块",
+          "  buildah/skopeo: 可用 --tls-verify=false（不推荐生产）",
+          "",
+          `原始错误: ${short(raw)}`,
+        ].join("\n"),
+        metadata: { error: "tls", registry, attempts: attemptsMeta },
+      }
+
+    case "unknown":
+      return {
+        title: "推送失败（未分类）",
+        output: [
+          `❌ 推送失败，错误未归类到已知类型（工具 [${tool}]）。`,
+          "",
+          "建议:",
+          `  - 手动运行 ${tool} push ${fullPath} 查看完整输出`,
+          "  - 或切换到 docker save + 平台 UI 手动上传",
+          "",
+          `原始错误: ${short(raw, 500)}`,
+          attemptsBlock,
+        ].join("\n"),
+        metadata: { error: "unknown", tool, attempts: attemptsMeta },
+      }
+  }
+}

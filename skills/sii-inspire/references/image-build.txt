@@ -150,6 +150,29 @@ CentOS/RHEL:   `dnf install podman buildah skopeo`
 **Last resort** (when no tool is available): use `docker save` / `podman save`
 to export a `.tar` file, then upload via platform UI (镜像管理 → 本地推送 → 上传 tar).
 
+### Push error diagnostics
+
+On failure `inspire_image_push` returns a structured `metadata.error` field
+so the caller can act without parsing free text. The kinds and how to handle
+each:
+
+| `metadata.error` | Meaning | Correct next action |
+|------------------|---------|---------------------|
+| `auth_failed` | Harbor rejected credentials | Re-fetch Robot password from platform UI, run `inspire_login(target="harbor", ...)`, retry |
+| `permission_denied` | Robot account lacks push scope for the target repo | Contact platform admin; temporary workaround = save+upload tar via UI |
+| `image_missing` | No tool's storage contained the image | Run `docker images` / `podman images` to locate it; cross-load with `docker save \| podman load` if needed, or rebuild |
+| `daemon_down` | Docker daemon not running, other tools couldn't see the image either | Start dockerd, or rebuild with podman/buildah into containers-storage |
+| `network` | Connection to Harbor failed | Check VPN/校园网, DNS (10.11.26.11), firewall |
+| `harbor_unavailable` | Harbor returned 5xx | Transient; retry after a while. Escalate if > 15 min |
+| `size_limit` | Image too large for registry | Shrink: -runtime base, `apt clean`, multi-stage build, split layers |
+| `tls` | Certificate/insecure-registry config missing | Configure insecure-registries in daemon config (per-tool syntax) |
+| `no_push_tool` | None of docker/podman/buildah/skopeo installed | `apt install podman buildah skopeo` (any one works) |
+| `unknown` | Error did not match any known pattern | Read `metadata.attempts[].raw` for details; manual push to debug |
+
+The tool stops the fallback chain on the first non-retriable error
+(everything except `image_missing` / `daemon_down` / `unknown`) so you
+get a clean diagnosis rather than four copies of the same message.
+
 ### After push — registration is mandatory
 
 1. Platform UI → 镜像管理 → 新建镜像

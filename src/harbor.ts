@@ -121,6 +121,95 @@ export namespace InspireHarbor {
     }
   }
 
+  // ── Push error taxonomy ────────────────────────────────────────
+
+  export type PushErrorKind =
+    | "auth_failed"
+    | "permission_denied"
+    | "image_missing"
+    | "daemon_down"
+    | "size_limit"
+    | "tls"
+    | "network"
+    | "harbor_unavailable"
+    | "unknown"
+
+  export interface PushErrorContext {
+    fullPath?: string
+    registry?: string
+    image?: string
+    attempts?: PushError[]
+  }
+
+  export class PushError extends Error {
+    context: PushErrorContext = {}
+
+    constructor(
+      public readonly kind: PushErrorKind,
+      public readonly tool: string,
+      public readonly raw: string,
+    ) {
+      super(`[${tool}] ${kind}: ${raw.slice(0, 200)}`)
+      this.name = "PushError"
+    }
+
+    /** Whether trying a different tool might succeed. */
+    get retriable(): boolean {
+      return this.kind === "image_missing" || this.kind === "daemon_down" || this.kind === "unknown"
+    }
+  }
+
+  // Pattern matchers are ordered — first match wins. Reasoning:
+  //   • `auth_failed` precedes `network`: some tools phrase 401 via "connection closed"
+  //   • `image_missing` precedes `daemon_down`: "image not known" can ride alongside daemon text
+  //   • `daemon_down` precedes `network`: the docker-specific signal is more actionable
+  //     than the generic "connection refused" it may echo
+  const PUSH_ERROR_RULES: Array<{ kind: PushErrorKind; match: RegExp }> = [
+    { kind: "auth_failed", match: /unauthorized|invalid credentials|invalid username|authentication required|401 unauthorized/i },
+    { kind: "permission_denied", match: /denied: requested access|403 forbidden|insufficient_scope/i },
+    { kind: "image_missing", match: /no such image|not found locally|image not known|reference does not exist|not in containers-storage|no image found/i },
+    { kind: "daemon_down", match: /cannot connect to the docker daemon|is the docker daemon running|daemon is not running/i },
+    { kind: "size_limit", match: /413 payload too large|blob upload invalid|manifest invalid|max size exceeded/i },
+    { kind: "tls", match: /x509:|tls:|certificate|insecure-registry|server gave http response to https client/i },
+    { kind: "network", match: /connection refused|etimedout|no route to host|no such host|i\/o timeout|network is unreachable/i },
+    { kind: "harbor_unavailable", match: /5\d\d (internal server error|bad gateway|service unavailable|gateway timeout)|error from registry|\bunavailable\b|registry returned error/i },
+  ]
+
+  function classifyStderr(stderr: string): PushErrorKind {
+    for (const rule of PUSH_ERROR_RULES) {
+      if (rule.match.test(stderr)) return rule.kind
+    }
+    return "unknown"
+  }
+
+  // Ordered from most- to least-informative. When several tool attempts
+  // each produce a different PushError, we surface the one earliest in
+  // this list — it's the most likely root cause to act on.
+  const AGGREGATION_PRIORITY: PushErrorKind[] = [
+    "auth_failed",
+    "permission_denied",
+    "size_limit",
+    "tls",
+    "harbor_unavailable",
+    "network",
+    "daemon_down",
+    "image_missing",
+    "unknown",
+  ]
+
+  function primaryError(attempts: PushError[]): PushError {
+    for (const kind of AGGREGATION_PRIORITY) {
+      const hit = attempts.find((a) => a.kind === kind)
+      if (hit) return hit
+    }
+    return attempts[attempts.length - 1]
+  }
+
+  // ── Push ───────────────────────────────────────────────────────
+
+  const PUSH_TOOLS = ["docker", "podman", "buildah", "skopeo"] as const
+  type PushTool = (typeof PUSH_TOOLS)[number]
+
   export async function pushImage(opts: {
     localImage: string
     remoteName: string
@@ -131,7 +220,9 @@ export namespace InspireHarbor {
     const creds = await InspireAuth.getHarborCredentials(target)
     if (!creds) {
       const registryName = target === "sj" ? "松江 (docker-t.sii.edu.cn)" : "七宝 (docker-qb.sii.edu.cn)"
-      throw new Error(`harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --username <用户名> --password <密码> --registry ${target}\n⚠️ Harbor 账号不是启智平台账号，需在「镜像管理 → 本地推送」页面获取。`)
+      throw new Error(
+        `harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --username <用户名> --password <密码> --registry ${target}\n⚠️ Harbor 账号不是启智平台账号，需在「镜像管理 → 本地推送」页面获取。`,
+      )
     }
 
     // Strip project prefix if user accidentally included it
@@ -145,122 +236,107 @@ export namespace InspireHarbor {
 
     const registry = InspireTypes.harborRegistry(target)
     const fullPath = `${registry}/${PROJECT}/${remoteName}:${opts.remoteTag}`
+    const pushOpts = { localImage: opts.localImage, fullPath, registry, creds }
 
-    // Try tools in order of preference. Each tool tries independently —
-    // if the image exists in that tool's storage and push succeeds, we're done.
-    // This lets users build with buildah and push without Docker installed.
-    const pushOpts = {
-      localImage: opts.localImage,
-      fullPath,
-      registry,
-      username: creds.username,
-      password: creds.password,
-    }
+    const attempts: PushError[] = []
+    let anyToolAvailable = false
 
-    const attempts: Array<{ tool: string; error: string }> = []
-    let anyToolFound = false
-
-    for (const tool of ["docker", "podman", "buildah", "skopeo"] as const) {
+    for (const tool of PUSH_TOOLS) {
       if (!(await checkTool(tool))) continue
-      anyToolFound = true
-      log.info(`attempting push with ${tool}`)
+      anyToolAvailable = true
       try {
         const digest = await pushWithTool(tool, pushOpts)
         return { fullPath, digest, warnedDuplicatePath, tool }
-      } catch (err: any) {
-        const msg = String(err?.message ?? err ?? "")
-        attempts.push({ tool, error: msg.slice(0, 500) })
-        log.info(`${tool} push failed, trying next`, { err: msg })
+      } catch (err) {
+        if (!(err instanceof PushError)) throw err
+        err.context = { fullPath, registry, image: opts.localImage }
+        attempts.push(err)
+        // Only retry on errors that could differ across tools. Auth /
+        // network / Harbor-side errors will reproduce everywhere — stop
+        // early so the user gets a clean diagnosis, not four copies of it.
+        if (!err.retriable) break
       }
     }
 
-    if (!anyToolFound) {
-      throw new Error(
-        "no_push_tool: 未找到任何可用的容器工具。支持的工具（按优先级）：docker, podman, buildah, skopeo。请至少安装其中之一，或使用 docker/podman save 导出 .tar 后在平台页面手动上传。",
-      )
-    }
+    if (!anyToolAvailable) throw new Error("no_push_tool")
 
-    throw new Error(
-      `all_push_tools_failed: 尝试了以下工具但都失败：\n${attempts.map((a) => `  [${a.tool}] ${a.error}`).join("\n")}`,
-    )
+    const primary = primaryError(attempts)
+    primary.context = { ...primary.context, attempts }
+    throw primary
   }
 
-  // Per-tool push implementation. All tools do: login → tag/copy → push.
+  /**
+   * Execute a single tool's push. Classifies any failure into a PushError
+   * before rethrowing; the outer fallback loop reads `kind` to decide whether
+   * trying the next tool is worthwhile.
+   */
   async function pushWithTool(
-    tool: "docker" | "podman" | "buildah" | "skopeo",
-    opts: { localImage: string; fullPath: string; registry: string; username: string; password: string },
+    tool: PushTool,
+    opts: { localImage: string; fullPath: string; registry: string; creds: { username: string; password: string } },
   ): Promise<string | undefined> {
-    const { localImage, fullPath, registry, username, password } = opts
-
-    if (tool === "docker" || tool === "podman") {
-      // docker / podman are CLI-compatible
-      await loginWithStdin(tool, registry, username, password)
-      await exec([tool, "tag", localImage, fullPath])
-      const pushOutput = await exec([tool, "push", fullPath])
-      return extractDigest(pushOutput)
-    }
-
-    if (tool === "buildah") {
-      // buildah supports --creds for single-shot push without a persistent login
-      // It reads images from containers-storage (default) which is where
-      // `buildah bud` puts them.
-      await loginWithStdin("buildah", registry, username, password)
-      // Tag inside buildah's storage. If localImage is already fully-qualified
-      // this is a no-op in terms of digest.
-      try {
-        await exec(["buildah", "tag", localImage, fullPath])
-      } catch {
-        // Tag may fail if the image isn't in buildah storage — skopeo/direct
-        // push to docker:// may still work from the daemon via --tls-verify
-      }
-      const pushOutput = await exec(["buildah", "push", "--format", "v2s2", fullPath, `docker://${fullPath}`])
-      return extractDigest(pushOutput)
-    }
-
-    if (tool === "skopeo") {
-      // skopeo is the most flexible — reads from containers-storage, docker-daemon,
-      // oci: directories, or .tar files. Try containers-storage first (populated
-      // by buildah/podman), then docker-daemon (populated by docker pull/build).
-      const destCreds = `${username}:${password}`
-      const sources = [`containers-storage:${localImage}`, `docker-daemon:${localImage}`]
-      let lastErr = ""
-      for (const src of sources) {
-        try {
-          const out = await exec([
-            "skopeo",
-            "copy",
-            "--dest-creds",
-            destCreds,
-            src,
-            `docker://${fullPath}`,
-          ])
-          return extractDigest(out)
-        } catch (err: any) {
-          lastErr = String(err?.message ?? err)
+    try {
+      switch (tool) {
+        case "docker":
+        case "podman": {
+          // docker and podman share the same CLI surface.
+          await loginWithStdin(tool, opts.registry, opts.creds)
+          await exec([tool, "tag", opts.localImage, opts.fullPath])
+          return extractDigest(await exec([tool, "push", opts.fullPath]))
+        }
+        case "buildah": {
+          await loginWithStdin("buildah", opts.registry, opts.creds)
+          // `buildah tag` can fail harmlessly when the local reference is
+          // already fully-qualified. Any real issue with the image will
+          // reappear in the subsequent push.
+          try {
+            await exec(["buildah", "tag", opts.localImage, opts.fullPath])
+          } catch {}
+          return extractDigest(
+            await exec(["buildah", "push", "--format", "v2s2", opts.fullPath, `docker://${opts.fullPath}`]),
+          )
+        }
+        case "skopeo": {
+          // skopeo can read from several local stores. Try each; surface
+          // the last attempt's error so the classifier sees real signal
+          // (auth failure from docker-daemon, not a generic "not found").
+          const destCreds = `${opts.creds.username}:${opts.creds.password}`
+          const sources = [`containers-storage:${opts.localImage}`, `docker-daemon:${opts.localImage}`]
+          let lastErr: unknown
+          for (const src of sources) {
+            try {
+              return extractDigest(
+                await exec(["skopeo", "copy", "--dest-creds", destCreds, src, `docker://${opts.fullPath}`]),
+              )
+            } catch (err) {
+              lastErr = err
+            }
+          }
+          throw lastErr
         }
       }
-      throw new Error(`skopeo: image not found in containers-storage or docker-daemon. Last error: ${lastErr}`)
+    } catch (err) {
+      const raw = String((err as Error)?.message ?? err ?? "")
+      throw new PushError(classifyStderr(raw), tool, raw)
     }
-
-    throw new Error(`unknown tool: ${tool}`)
   }
 
-  async function loginWithStdin(tool: string, registry: string, username: string, password: string): Promise<void> {
-    const proc = Bun.spawn([tool, "login", registry, "-u", username, "--password-stdin"], {
+  async function loginWithStdin(
+    tool: string,
+    registry: string,
+    creds: { username: string; password: string },
+  ): Promise<void> {
+    const proc = Bun.spawn([tool, "login", registry, "-u", creds.username, "--password-stdin"], {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
     })
-    proc.stdin.write(password)
+    proc.stdin.write(creds.password)
     proc.stdin.end()
     const exitCode = await proc.exited
-    const stderr = await new Response(proc.stderr).text()
-    if (exitCode !== 0) throw new Error(`${tool} login failed: ${stderr}`)
-  }
-
-  function extractDigest(output: string): string | undefined {
-    const m = output.match(/digest:\s*(sha256:[a-f0-9]+)/i)
-    return m ? m[1] : undefined
+    if (exitCode !== 0) {
+      const stderr = await new Response(proc.stderr).text()
+      throw new Error(stderr || `${tool} login failed (exit ${exitCode})`)
+    }
   }
 
   async function exec(cmd: string[]): Promise<string> {
@@ -268,18 +344,18 @@ export namespace InspireHarbor {
     const exitCode = await proc.exited
     const stdout = await new Response(proc.stdout).text()
     const stderr = await new Response(proc.stderr).text()
-    if (exitCode !== 0) throw new Error(stderr || stdout)
+    if (exitCode !== 0) throw new Error(stderr || stdout || `${cmd[0]} failed (exit ${exitCode})`)
     return stdout
+  }
+
+  function extractDigest(output: string): string | undefined {
+    const m = output.match(/digest:\s*(sha256:[a-f0-9]+)/i)
+    return m ? m[1] : undefined
   }
 
   async function checkTool(tool: string): Promise<boolean> {
     try {
-      // Different tools have different version commands; --version works for
-      // docker/podman/buildah/skopeo. We ignore stdout content.
-      const proc = Bun.spawn([tool, "--version"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      })
+      const proc = Bun.spawn([tool, "--version"], { stdout: "pipe", stderr: "pipe" })
       return (await proc.exited) === 0
     } catch {
       return false
