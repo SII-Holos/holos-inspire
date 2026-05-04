@@ -112,3 +112,64 @@ The project_id in the request doesn't match any project you're currently a membe
 
 ### API 权限未开通
 Your account may not have API access. Contact platform administrator to enable it. Check under 个人中心 → API 管理.
+
+## Failure Auto-Retry Protocol
+
+When an experiment fails, don't just report it — attempt automated diagnosis and recovery before escalating. The table below summarizes the recognized failure classes and the recovery actions.
+
+### Recognized failure classes
+
+| Class | Detection | Auto-recovery | Max retries | Escalate when |
+|-------|-----------|---------------|-------------|---------------|
+| **OOM (GPU)** | `CUDA out of memory`, `Killed` in log | Halve `batch_size`, double `gradient_accumulation_steps` | 2 | bs would drop below 1, or OOM persists at bs=1 |
+| **NaN / Inf loss** | `nan`, `inf`, `loss is NaN`, `diverged` in log | LR ×0.1, enable `max_grad_norm=1.0`, enable dynamic loss scale | 2 | Still diverges (likely method/code bug, not HP) |
+| **Preempted** | Job status `stopped` not by user, logs end mid-training | Resume from latest checkpoint; if none, resubmit at higher priority | unlimited while progress | Preempted 3+ times (queue too contested) |
+| **Stale process** | GPU util < 10% for > 15 min, no log for > 10 min | `inspire_stop` + kill + resubmit | 1 | Stalls again on retry (data pipeline deadlock) |
+| **Import error** | `ModuleNotFoundError`, `ImportError`, `conda: command not found` | Fix env init in command (check `source conda.sh`, image, offline deps) | 1 | Package truly missing in image → rebuild image |
+| **Data path error** | `FileNotFoundError`, `No such file or directory` for data | Check `ASSETS.md` / project en_name in path; fix and resubmit | 1 | Data actually doesn't exist on platform → need to upload |
+| **Image / GPU mismatch** | Immediate CUDA errors, `no CUDA-capable device`, driver mismatch | Switch to correct compute group from `inspire_status`; rebuild image if CUDA ver wrong | 1 | No compatible GPUs available anywhere |
+
+### Protocol rules
+
+1. **Max 2 automatic retries per failure type** per experiment. After that, escalate.
+2. **Each retry is a NEW experiment record** — don't overwrite the original. Link via notes.
+3. **Record failure reason** on the original experiment:
+   ```
+   research_experiment(action="fail", id="exp_007",
+     failure_reason="OOM at step 8000, batch_size=128")
+   ```
+4. **Record retry link** in the new experiment's notes:
+   ```
+   Retry of exp_007 — reduced batch_size 128 → 64
+   ```
+5. **Never retry silently** — append to research_timeline:
+   ```
+   research_timeline(action="append_free_event", event_type="decision",
+     summary="Auto-retry exp_007 → exp_008 (bs 128 → 64 due to OOM)",
+     event_refs=["exp_007", "exp_008"])
+   ```
+
+### Escalation format
+
+When auto-recovery fails or the failure class is unknown:
+
+```
+⚠️ Experiment exp_XXX failed and auto-recovery was unsuccessful.
+
+Failure class: [OOM / NaN / preempt / stale / import / data / image / unknown]
+Attempts:      [N]
+Last error:    [exact log excerpt]
+
+Recommended next step:
+  - [specific action for this failure class]
+  - Method-level issue → consider rollback to spec phase
+  - Infrastructure issue → check platform status / image / data path
+```
+
+### Participation mode behavior
+
+Different Synergy modes treat auto-retry differently:
+
+- **collaborative**: Report every failure, ASK before retrying
+- **guided**: Auto-retry OOM / preempt silently, report other classes
+- **autonomous**: Auto-retry all known classes, escalate only unknowns and after 2+ retry exhaustion

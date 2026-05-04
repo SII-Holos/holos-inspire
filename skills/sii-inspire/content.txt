@@ -7,18 +7,35 @@ Use this skill when the user wants to run experiments, manage Docker images, or 
 If inspire_config shows no defaults configured:
 
 1. Run `inspire_status` to discover projects, workspaces, compute groups, and available resource specs
-2. Set defaults:
+2. Set defaults (per Synergy user, applies to all sessions):
    ```
    inspire_config(action="set", key="defaultProject", value="项目名")
    inspire_config(action="set", key="defaultWorkspace", value="分布式训练空间")
    inspire_config(action="set", key="defaultImage", value="docker.sii.shaipower.online/inspire-studio/xxx:tag")
    inspire_config(action="set", key="defaultPriority", value="9")
    inspire_config(action="set", key="defaultShm", value="1200")
-   inspire_config(action="set", key="commandPrefix", value="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && cd /inspire/hdd/project/{en_name}/code")
    ```
 3. After setup, `inspire_submit` only needs `name`, `command`, `compute_group`, and `spec`
 
 Note: `spec` (spec_id) and `compute_group` are NOT stored as defaults — they vary by workspace and task type. Use `inspire_status` to see available specs, then pass them directly.
+
+### ⚠️ Do NOT set `commandPrefix`
+
+`commandPrefix` is a **Synergy-wide global** applied to EVERY `inspire_submit` command regardless of project. Setting it breaks whenever:
+- You have multiple research projects in parallel (each with different conda envs / code paths)
+- You switch project context mid-session
+- A different agent / sub-session uses inspire_submit with an unrelated command
+
+**Correct pattern**: write env init in every `command` explicitly:
+```
+command="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && cd /inspire/hdd/project/{en_name}/code && python train.py"
+```
+It's 2 extra lines per submit, but zero cross-project interference.
+
+If a previous session left `commandPrefix` set, clear it:
+```
+inspire_config(action="set", key="commandPrefix", value="")
+```
 
 ## Core Workflows
 
@@ -105,6 +122,88 @@ inspire_submit(name="exp-001",
 
 To read results: `inspire_logs(job_id="job-xxx")` or submit a lightweight CPU job to cat the log file.
 
+## Command Templates
+
+Copy-paste templates with correct env init, log capture, and storage paths. Replace `{en_name}` with the project's English name (from `inspire_status` output).
+
+### 4090 (可上网GPU资源, online)
+
+```
+inspire_submit(
+  name="exp_007",
+  workspace="可上网GPU资源",
+  compute_group="4090-cuda12.8-2",
+  spec="<train_spec_id>",
+  image="docker.sii.shaipower.online/inspire-studio/myproject:v1",
+  command="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && "
+          "cd /inspire/hdd/project/{en_name}/code && "
+          "python train.py --seed 42 "
+          "2>&1 | tee /inspire/hdd/project/{en_name}/logs/exp_007.log",
+  priority=9)
+```
+
+### H200 / H100 (分布式训练空间, OFFLINE — all deps must be in image)
+
+```
+inspire_submit(
+  name="exp_008",
+  workspace="分布式训练空间",
+  compute_group="cuda12.8版本H100",     # or H200-* / cuda12.9版本H100
+  spec="<train_spec_id>",
+  image="docker.sii.shaipower.online/inspire-studio/myproject:v1",
+  command="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && "
+          "cd /inspire/hdd/project/{en_name}/code && "
+          "python train.py --config large.yaml --seed 42 "
+          "2>&1 | tee /inspire/hdd/project/{en_name}/logs/exp_008.log",
+  shm=65536,                            # ≥64GB for multi-GPU
+  priority=9)
+```
+
+### CPU (CPU资源空间, online, free tier at priority 1-3)
+
+```
+inspire_submit(
+  name="eval-exp_007",
+  workspace="CPU资源空间",
+  compute_group="CPU资源-2",
+  spec="<cpu_spec_id>",
+  command="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && "
+          "cd /inspire/hdd/project/{en_name}/code && "
+          "python eval.py --checkpoint /inspire/hdd/project/{en_name}/ckpts/exp_007/last.pt "
+          "2>&1 | tee /inspire/hdd/project/{en_name}/logs/eval-exp_007.log",
+  priority=3)    # priority 1-3 is budget-exempt
+```
+
+### HPC/Slurm (高性能计算, OFFLINE, multi-node CPU)
+
+```
+inspire_submit_hpc(
+  name="preprocess",
+  workspace="高性能计算",
+  compute_group="高性能计算",
+  spec="<hpc_spec_id>",
+  image="docker.sii.shaipower.online/inspire-studio/slurm-xxx:tag",   # MUST have "slurm" in name
+  entrypoint="source /opt/conda/etc/profile.d/conda.sh && conda activate myenv && "
+             "bash /inspire/hdd/project/{en_name}/code/scripts/preprocess.sh",
+  number_of_tasks=2,
+  cpus_per_task=4,
+  memory_per_cpu="8G")
+```
+
+### Data download job (run in online space, data visible to offline space via shared storage)
+
+```
+inspire_submit(
+  name="download-llama3",
+  workspace="CPU资源空间",
+  compute_group="CPU资源-2",
+  spec="<cpu_spec_id>",
+  command="export HF_ENDPOINT=https://hf-mirror.com && "
+          "huggingface-cli download meta-llama/Llama-3-8B "
+          "--local-dir /inspire/hdd/project/{en_name}/models/llama3-8b",
+  priority=3)
+```
+
 ## Key Platform Rules
 
 ### Images & Registries
@@ -122,7 +221,7 @@ To read results: `inspire_logs(job_id="job-xxx")` or submit a lightweight CPU jo
 ### Compute & Scheduling
 - **Priority ≥4**: won't be preempted. Priority 1-3: can be killed by higher-priority tasks.
 - **Low-priority CPU tasks (1-3)**: exempt from budget — useful when budget is exhausted
-- **Non-interactive shell**: ~/.bashrc NOT loaded. Must `source /opt/conda/etc/profile.d/conda.sh && conda activate myenv` in every command. Use `commandPrefix` to automate this.
+- **Non-interactive shell**: ~/.bashrc NOT loaded. Must `source /opt/conda/etc/profile.d/conda.sh && conda activate myenv` explicitly in every command. Do NOT use `commandPrefix` — see "First-Time Setup" for why.
 - **Offline spaces**: no pip install, git clone, wget. All dependencies must be in the Docker image.
 - **Distributed training env vars**: platform auto-injects MASTER_ADDR, MASTER_PORT, PET_NNODES, PET_NODE_RANK, PET_NPROC_PER_NODE
 
@@ -146,5 +245,6 @@ Tools auto-detect the type by prefix.
 ## When to Load References
 
 - Platform spaces, storage, quota rules → load `references/platform-guide.txt`
-- Task failures, queue issues, common errors → load `references/troubleshooting.txt`
+- Building / pushing / registering Docker images, Dockerfile templates, buildah fallback → load `references/image-build.txt`
+- Task failures, queue issues, auto-retry protocols for OOM / NaN / preempt → load `references/troubleshooting.txt`
 - Multi-GPU training, NCCL, torchrun setup → load `references/distributed-training.txt`

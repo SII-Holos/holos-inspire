@@ -1,0 +1,208 @@
+# Image Building — SII 启智平台
+
+Every serious experiment should run in a project-specific Docker image with ALL dependencies pre-installed. Do NOT rely on runtime `pip install` / `apt-get install` inside the submitted command — this is slow, fragile, and **impossible in offline spaces** (分布式训练空间, 高性能计算, 整节点任务空间).
+
+## Core Rule
+
+**Pre-build everything. Runtime installs are forbidden.**
+
+1. Add all deps to `pyproject.toml` (or `requirements.txt`, or `environment.yml`)
+2. Build a local image with those deps baked in
+3. Push to Harbor via `inspire_image_push`
+4. **Register** on the platform (required — push alone doesn't make it usable)
+5. Submit experiments using the registered image
+
+## Dockerfile Templates
+
+### Template A — uv-based (recommended, fast and reproducible)
+
+```dockerfile
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+# Mirrors (only add if build fails with download timeouts on mainland network)
+# RUN sed -i 's|archive.ubuntu.com|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list
+# RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# ENV HF_ENDPOINT=https://hf-mirror.com
+
+RUN pip install uv
+
+WORKDIR /workspace
+COPY pyproject.toml uv.lock ./
+RUN uv sync --extra train --frozen
+
+# uv creates .venv/ — activate in submit command via:
+#   source /workspace/.venv/bin/activate
+```
+
+### Template B — conda-based (traditional)
+
+```dockerfile
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+
+RUN apt-get update && apt-get install -y wget git && rm -rf /var/lib/apt/lists/*
+
+# Install miniconda
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh \
+    && bash /tmp/miniconda.sh -b -p /opt/conda \
+    && rm /tmp/miniconda.sh
+
+ENV PATH=/opt/conda/bin:$PATH
+
+# Create env with deps pinned
+COPY environment.yml /tmp/
+RUN conda env create -f /tmp/environment.yml -n myenv \
+    && conda clean -afy
+
+# Activate in submit command via:
+#   source /opt/conda/etc/profile.d/conda.sh && conda activate myenv
+```
+
+### Template C — extending a platform base image (minimal custom work)
+
+```dockerfile
+FROM docker.sii.shaipower.online/inspire-studio/pytorch:2.5.1-cuda12.4-cudnn9.1.0-devel-ubuntu22.04
+
+RUN pip install -i http://nexus.sii.shaipower.online/repository/pypi_proxy/simple/ \
+                --trusted-host nexus.sii.shaipower.online \
+                transformers==4.50.0 datasets accelerate wandb
+
+# conda already set up in base image, activate via:
+#   source /opt/conda/etc/profile.d/conda.sh && conda activate base
+```
+
+## Build Procedure
+
+### Standard path
+
+```bash
+docker build -t myproject:v1 -f Dockerfile .
+inspire_image_push(image="myproject:v1")
+# Then: 镜像管理 → 新建镜像 → 镜像名称=myproject, 版本号=v1
+```
+
+### If `docker build` fails (cgroup / permission errors on shared hosts)
+
+This is very common on research cluster login nodes. Fall back to buildah with chroot isolation:
+
+```bash
+buildah bud --isolation chroot -t myproject:v1 -f Dockerfile .
+buildah push myproject:v1 docker://docker.sii.shaipower.online/inspire-studio/myproject:v1
+```
+
+`buildah --isolation chroot` bypasses the cgroup requirements that trip up Docker. After push, still need to register on the platform.
+
+### Mainland network mirrors (use when base image download or deps install times out)
+
+Add at the TOP of the Dockerfile (before any apt-get / pip install):
+
+```dockerfile
+# apt mirror (Tsinghua)
+RUN sed -i 's|archive.ubuntu.com|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list \
+    && sed -i 's|security.ubuntu.com|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list
+
+# pip mirror (Tsinghua)
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && pip config set install.trusted-host pypi.tuna.tsinghua.edu.cn
+
+# HuggingFace mirror
+ENV HF_ENDPOINT=https://hf-mirror.com
+```
+
+Alternatively, use the platform's internal Nexus mirror (works from BOTH online and offline spaces — since this is in-cluster):
+
+```dockerfile
+RUN pip config set global.index-url http://nexus.sii.shaipower.online/repository/pypi_proxy/simple/ \
+    && pip config set install.trusted-host nexus.sii.shaipower.online
+```
+
+## Push Workflow (automation)
+
+The `inspire_image_push` tool handles docker login, tag rewriting, and push:
+
+```
+inspire_image_push(
+  image="myproject:v1",              # your local tag
+  name="myproject",                  # defaults to image name (NO inspire-studio/ prefix)
+  tag="v1",                          # defaults to image tag
+  registry="qb"                      # "qb" (default) or "sj" for SJ space
+)
+```
+
+After push, **you MUST register the image** or submit will fail with "image not found":
+
+1. Platform UI → 镜像管理 → 新建镜像
+2. Fill 镜像名称 (e.g. `myproject`) and 版本号 (e.g. `v1`) — must match push name/tag exactly
+3. Save
+
+Once registered, use the display domain in all submit commands:
+```
+docker.sii.shaipower.online/inspire-studio/myproject:v1        (main registry)
+docker-t.sii.shaipower.online/inspire-studio/myproject:v1      (SJ only)
+```
+
+## Image-Building Decisions
+
+### When to build a new image vs. reuse an existing one
+
+| Situation | Action |
+|-----------|--------|
+| New project, different framework/deps | Build new image |
+| Same project, one new package | Prefer `uv add` + rebuild image (reproducible). Only install at runtime if in online space AND the package is truly one-off. |
+| Debugging / exploration | Use a notebook instance with base image, install deps interactively. Save as image only when stable. |
+| Quick sanity check with platform base image | Use `docker.sii.shaipower.online/inspire-studio/pytorch:2.5.1-cuda12.4-...` directly |
+
+### CUDA version across GPU types
+
+Build ONE image with a CUDA version compatible across all target GPUs. Don't build separate images per GPU.
+
+- 4090 / H100: supports CUDA 12.1+, 12.4, 12.8
+- H200: supports CUDA 12.4, 12.8 (NOT 12.9 as of 2026-03)
+- **Recommended**: CUDA 12.4 or 12.8 for maximum cross-GPU compatibility
+
+### Image size
+
+Keep images < 20GB when possible:
+- Images > 20GB take 20+ min to pull the first time on each node
+- Use `-runtime` base images instead of `-devel` when you don't need nvcc
+- Clean caches before saving: `apt clean && pip cache purge && rm -rf ~/.cache ~/.local`
+- Use multi-stage builds for images with build tools
+
+Images > 100GB **may fail to save** entirely.
+
+## Data Downloading (not image-baked)
+
+Do NOT bake large datasets or model weights into the image. Instead:
+
+1. Submit a lightweight CPU download job in an online space (same project → shared storage):
+   ```
+   inspire_submit(name="download-llama3",
+     workspace="CPU资源空间",
+     command="export HF_ENDPOINT=https://hf-mirror.com && huggingface-cli download meta-llama/Llama-3-8B --local-dir /inspire/hdd/project/{en_name}/models/llama3-8b",
+     compute_group="CPU资源", spec="<cpu_spec_id>", priority=2)
+   ```
+2. Training job in offline space accesses `/inspire/hdd/project/{en_name}/models/llama3-8b` directly (shared storage across spaces)
+
+## Common Build Pitfalls
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `docker build` cgroup error | Shared host, no cgroup access | `buildah bud --isolation chroot` |
+| `pip install` timeout | Mainland network, slow upstream | Add Tsinghua mirror or Nexus mirror |
+| `apt-get update` fails | Same as above | Add Tsinghua `sources.list` sed |
+| Base image pull timeout | Large image, slow network | Use Nexus mirror, or pull once in online space |
+| Push succeeds but "image not found" at submit | Forgot to register | 镜像管理 → 新建镜像 |
+| Submit succeeds but job stuck "creating" 20+ min | Large image, cold cache on target node | Wait, or pre-pull by running a tiny task first |
+| `conda: command not found` at runtime | Non-interactive shell | `source /opt/conda/etc/profile.d/conda.sh && conda activate <env>` |
+| `nvcc: command not found` during build | Using `-runtime` base, not `-devel` | Switch to `-devel` base image |
+| `CUDA error: no kernel image` at runtime | Image CUDA too new/old for target GPU | Use CUDA 12.4 or 12.8 for cross-GPU compatibility |
+
+## Verification Checklist
+
+Before submitting a real experiment with a new image:
+
+- [ ] `docker images` shows the local build
+- [ ] `inspire_image_push` returned success
+- [ ] Image is registered on the platform UI (check `inspire_images(search="myproject")`)
+- [ ] Spec submit: smoke-test with a trivial command (`echo hello && python -c "import torch; print(torch.__version__)"`) in a cheap compute group
+- [ ] Smoke test log confirms: conda activates, Python version correct, all imports work
+- [ ] Only then submit the real training job
