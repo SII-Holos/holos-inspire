@@ -31,25 +31,29 @@ export const inspireLogin = tool({
   },
   async execute(params): Promise<InspireTypes.ToolResult> {
     if (params.target === "inspire") {
-      await InspireAuth.saveInspireCredentials(params.username, params.password)
-
+      // IMPORTANT: validate the new credentials BEFORE persisting them.
+      // Previously we saved first, then called requireToken() — but
+      // requireToken() reads cached tokens first, so a valid cached
+      // token would make login report success even when the new
+      // password was wrong. That caused the new (possibly wrong)
+      // password to silently overwrite the stored password, breaking
+      // all subsequent inspire_* calls once the cache eventually expired.
       try {
-        await InspireAuth.requireToken()
-        return {
-          title: "认证成功",
-          output: "✅ 启智平台认证成功，凭证已保存。后续 inspire_* 工具将自动使用此认证。",
-          metadata: { target: "inspire", status: "ok" },
-        }
+        await InspireAuth.loginWithFreshCredentials(params.username, params.password)
       } catch (err: any) {
-        InspireAuth.clearToken()
+        // Do NOT save credentials on failure — keep existing stored
+        // credentials intact so the user isn't locked out by a typo.
         const reason = err?.reason ?? "unknown"
         if (reason === "credentials_invalid") {
           return {
             title: "认证失败",
-            output: "❌ 用户名或密码错误，请确认学工号和密码后重试。",
+            output: "❌ 用户名或密码错误，请确认学工号和密码后重试。已保存的凭证未被修改。",
             metadata: { target: "inspire", status: "invalid_credentials" },
           }
         }
+        // Network / VPN / platform down — save credentials anyway so
+        // they can be used when connectivity returns.
+        await InspireAuth.saveInspireCredentials(params.username, params.password)
         return {
           title: "凭证已保存",
           output: [
@@ -59,6 +63,14 @@ export const inspireLogin = tool({
           ].join("\n"),
           metadata: { target: "inspire", status: "saved_unverified" },
         }
+      }
+
+      // Validation passed → persist credentials.
+      await InspireAuth.saveInspireCredentials(params.username, params.password)
+      return {
+        title: "认证成功",
+        output: "✅ 启智平台认证成功，凭证已保存。后续 inspire_* 工具将自动使用此认证。",
+        metadata: { target: "inspire", status: "ok" },
       }
     }
 

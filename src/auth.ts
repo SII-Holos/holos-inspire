@@ -73,7 +73,7 @@ export namespace InspireAuth {
     // Try persisted token set (access + refresh)
     try {
       const raw = await pluginCache().get("inspire-keycloak-token")
-      if (raw) {
+      if (raw && raw !== "") {
         const cache: KeycloakTokenSet = typeof raw === "string" ? JSON.parse(raw) : raw
 
         // Access token still valid
@@ -106,8 +106,48 @@ export namespace InspireAuth {
     return result.access_token
   }
 
+  /**
+   * Force-authenticate with the given credentials, bypassing ALL caches.
+   *
+   * Unlike `requireToken()`, this never reads in-memory or persisted tokens —
+   * it calls Keycloak's password grant directly. On success, the newly
+   * acquired token overwrites both caches so subsequent calls use it.
+   * On failure, all caches are invalidated to prevent stale tokens from
+   * masking the failure.
+   *
+   * Used by the login tool to validate new credentials before persisting
+   * them, which prevents the credential-validation-bypass bug where a
+   * cached token made the login tool report success even when the new
+   * password was wrong.
+   */
+  export async function loginWithFreshCredentials(username: string, password: string): Promise<void> {
+    try {
+      const result = await passwordGrant(username, password)
+      await persistTokenSet(result)
+      cachedToken = result.access_token
+    } catch (err) {
+      // Invalidate all caches on failure so no stale token can be returned later.
+      await invalidateAllTokens()
+      throw err
+    }
+  }
+
   export function clearToken(): void {
     cachedToken = undefined
+  }
+
+  /**
+   * Invalidate both the in-memory token cache AND the persisted Keycloak
+   * token set. Writes a short-TTL empty value rather than relying on a
+   * `delete` API that may not exist on all PluginCacheStore implementations.
+   */
+  export async function invalidateAllTokens(): Promise<void> {
+    cachedToken = undefined
+    try {
+      await pluginCache().set("inspire-keycloak-token", "", 1)
+    } catch {
+      // Ignore failures — the cached TTL will eventually expire.
+    }
   }
 
   // ── Cookie auth (fallback for v1-only endpoints) ───────────────
