@@ -167,14 +167,63 @@ export namespace InspireAuth {
 
   // ── Retry wrappers ─────────────────────────────────────────────
 
+  /**
+   * Force-acquire a new access token when the current cached one is
+   * rejected by the platform (401). Tries in order:
+   *
+   * 1. Use the persisted refresh_token to hit Keycloak's refresh grant
+   *    (cheap, usually succeeds if refresh is still valid)
+   * 2. Fall back to ROPC password grant with saved credentials
+   *    (bypasses ALL caches — guaranteed fresh if credentials are valid)
+   *
+   * This exists because Keycloak can revoke tokens server-side (admin
+   * action, session limit, backend restart) even when the local
+   * access_expires_at hasn't passed. In that case, simply clearing the
+   * in-memory cachedToken is not enough — requireToken() would still
+   * return the revoked token from pluginCache.
+   */
+  export async function forceRefreshToken(): Promise<string> {
+    cachedToken = undefined
+
+    // Try refresh grant first
+    try {
+      const raw = await pluginCache().get("inspire-keycloak-token")
+      if (raw && raw !== "") {
+        const cache: KeycloakTokenSet = typeof raw === "string" ? JSON.parse(raw) : raw
+        if (cache.refresh_token && cache.refresh_expires_at > Date.now() + REFRESH_SLIPPAGE_MS) {
+          try {
+            const refreshed = await refreshTokenGrant(cache.refresh_token)
+            await persistTokenSet(refreshed)
+            cachedToken = refreshed.access_token
+            return refreshed.access_token
+          } catch {
+            // Refresh token also revoked — fall through to ROPC
+          }
+        }
+      }
+    } catch {}
+
+    // Fall back to ROPC with saved credentials
+    await invalidateAllTokens()
+    const creds = await getInspireCredentials()
+    if (!creds) throw new TokenUnavailableError("inspire_not_authenticated", "not_authenticated")
+
+    const result = await passwordGrant(creds.username, creds.password)
+    await persistTokenSet(result)
+    cachedToken = result.access_token
+    return result.access_token
+  }
+
   export async function withTokenRetry<T>(fn: (token: string) => Promise<T>): Promise<T> {
     try {
       const token = await requireToken()
       return await fn(token)
     } catch (err: any) {
       if (isAuthError(err)) {
-        clearToken()
-        const freshToken = await requireToken()
+        // Don't just clear the in-memory cache — the persisted cache
+        // likely holds the same revoked token. Force an actual refresh
+        // against Keycloak.
+        const freshToken = await forceRefreshToken()
         return await fn(freshToken)
       }
       throw err
