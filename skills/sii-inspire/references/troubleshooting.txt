@@ -78,7 +78,7 @@ source /opt/conda/etc/profile.d/conda.sh && conda activate myenv
 ```
 Find conda path: `which conda` → e.g., `/root/miniconda3/bin/conda` → init at `/root/miniconda3/etc/profile.d/conda.sh`
 
-Tip: set `commandPrefix` via `inspire_config` to automate this for every submit.
+Tip: write the full env init explicitly in every command. Do NOT set `commandPrefix` — see the main skill's "First-Time Setup" section for why (Synergy-wide global breaks multi-project setups).
 
 ### `uv: not found` / `poetry: not found` / `pip: not found`
 PATH not set in non-interactive shell. Fix:
