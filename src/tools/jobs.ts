@@ -155,8 +155,18 @@ export const inspireJobs = tool({
     }
 
     allJobs.sort((a, b) => {
-      const order = { running: 0, waiting: 1, failed: 2, succeeded: 3, stopped: 4, unknown: 5 }
-      const diff = (order[a.status.family] ?? 5) - (order[b.status.family] ?? 5)
+      const order: Record<InspireTypes.StatusFamily["family"], number> = {
+        running: 0,
+        creating: 1,
+        starting: 1,
+        waiting: 1,
+        stopping: 2,
+        failed: 3,
+        succeeded: 4,
+        stopped: 5,
+        unknown: 6,
+      }
+      const diff = (order[a.status.family] ?? 6) - (order[b.status.family] ?? 6)
       if (diff !== 0) return diff
       return (b.created_at ?? "").localeCompare(a.created_at ?? "")
     })
