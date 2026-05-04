@@ -126,7 +126,7 @@ export namespace InspireHarbor {
     remoteName: string
     remoteTag: string
     target?: InspireTypes.HarborTarget
-  }): Promise<{ fullPath: string; digest?: string; warnedDuplicatePath?: boolean }> {
+  }): Promise<{ fullPath: string; digest?: string; warnedDuplicatePath?: boolean; tool: string }> {
     const target = opts.target ?? "qb"
     const creds = await InspireAuth.getHarborCredentials(target)
     if (!creds) {
@@ -134,7 +134,7 @@ export namespace InspireHarbor {
       throw new Error(`harbor_not_authenticated: ${registryName} 未配置凭据。请运行 synergy inspire harbor-login --username <用户名> --password <密码> --registry ${target}\n⚠️ Harbor 账号不是启智平台账号，需在「镜像管理 → 本地推送」页面获取。`)
     }
 
-    // Strip project prefix if user accidentally included it (e.g. "inspire-studio/faro-postgres" → "faro-postgres")
+    // Strip project prefix if user accidentally included it
     let remoteName = opts.remoteName
     let warnedDuplicatePath = false
     const projectPrefix = `${PROJECT}/`
@@ -146,32 +146,121 @@ export namespace InspireHarbor {
     const registry = InspireTypes.harborRegistry(target)
     const fullPath = `${registry}/${PROJECT}/${remoteName}:${opts.remoteTag}`
 
-    const hasDocker = await checkDocker()
-    if (!hasDocker) throw new Error("docker is not installed or not in PATH")
+    // Try tools in order of preference. Each tool tries independently —
+    // if the image exists in that tool's storage and push succeeds, we're done.
+    // This lets users build with buildah and push without Docker installed.
+    const pushOpts = {
+      localImage: opts.localImage,
+      fullPath,
+      registry,
+      username: creds.username,
+      password: creds.password,
+    }
 
-    log.info("docker login", { registry })
-    const loginProc = Bun.spawn(["docker", "login", registry, "-u", creds.username, "--password-stdin"], {
+    const attempts: Array<{ tool: string; error: string }> = []
+    let anyToolFound = false
+
+    for (const tool of ["docker", "podman", "buildah", "skopeo"] as const) {
+      if (!(await checkTool(tool))) continue
+      anyToolFound = true
+      log.info(`attempting push with ${tool}`)
+      try {
+        const digest = await pushWithTool(tool, pushOpts)
+        return { fullPath, digest, warnedDuplicatePath, tool }
+      } catch (err: any) {
+        const msg = String(err?.message ?? err ?? "")
+        attempts.push({ tool, error: msg.slice(0, 500) })
+        log.info(`${tool} push failed, trying next`, { err: msg })
+      }
+    }
+
+    if (!anyToolFound) {
+      throw new Error(
+        "no_push_tool: 未找到任何可用的容器工具。支持的工具（按优先级）：docker, podman, buildah, skopeo。请至少安装其中之一，或使用 docker/podman save 导出 .tar 后在平台页面手动上传。",
+      )
+    }
+
+    throw new Error(
+      `all_push_tools_failed: 尝试了以下工具但都失败：\n${attempts.map((a) => `  [${a.tool}] ${a.error}`).join("\n")}`,
+    )
+  }
+
+  // Per-tool push implementation. All tools do: login → tag/copy → push.
+  async function pushWithTool(
+    tool: "docker" | "podman" | "buildah" | "skopeo",
+    opts: { localImage: string; fullPath: string; registry: string; username: string; password: string },
+  ): Promise<string | undefined> {
+    const { localImage, fullPath, registry, username, password } = opts
+
+    if (tool === "docker" || tool === "podman") {
+      // docker / podman are CLI-compatible
+      await loginWithStdin(tool, registry, username, password)
+      await exec([tool, "tag", localImage, fullPath])
+      const pushOutput = await exec([tool, "push", fullPath])
+      return extractDigest(pushOutput)
+    }
+
+    if (tool === "buildah") {
+      // buildah supports --creds for single-shot push without a persistent login
+      // It reads images from containers-storage (default) which is where
+      // `buildah bud` puts them.
+      await loginWithStdin("buildah", registry, username, password)
+      // Tag inside buildah's storage. If localImage is already fully-qualified
+      // this is a no-op in terms of digest.
+      try {
+        await exec(["buildah", "tag", localImage, fullPath])
+      } catch {
+        // Tag may fail if the image isn't in buildah storage — skopeo/direct
+        // push to docker:// may still work from the daemon via --tls-verify
+      }
+      const pushOutput = await exec(["buildah", "push", "--format", "v2s2", fullPath, `docker://${fullPath}`])
+      return extractDigest(pushOutput)
+    }
+
+    if (tool === "skopeo") {
+      // skopeo is the most flexible — reads from containers-storage, docker-daemon,
+      // oci: directories, or .tar files. Try containers-storage first (populated
+      // by buildah/podman), then docker-daemon (populated by docker pull/build).
+      const destCreds = `${username}:${password}`
+      const sources = [`containers-storage:${localImage}`, `docker-daemon:${localImage}`]
+      let lastErr = ""
+      for (const src of sources) {
+        try {
+          const out = await exec([
+            "skopeo",
+            "copy",
+            "--dest-creds",
+            destCreds,
+            src,
+            `docker://${fullPath}`,
+          ])
+          return extractDigest(out)
+        } catch (err: any) {
+          lastErr = String(err?.message ?? err)
+        }
+      }
+      throw new Error(`skopeo: image not found in containers-storage or docker-daemon. Last error: ${lastErr}`)
+    }
+
+    throw new Error(`unknown tool: ${tool}`)
+  }
+
+  async function loginWithStdin(tool: string, registry: string, username: string, password: string): Promise<void> {
+    const proc = Bun.spawn([tool, "login", registry, "-u", username, "--password-stdin"], {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
     })
-    loginProc.stdin.write(creds.password)
-    loginProc.stdin.end()
-    const loginExit = await loginProc.exited
-    const loginStderr = await new Response(loginProc.stderr).text()
-    if (loginExit !== 0) throw new Error(`docker login failed: ${loginStderr}`)
+    proc.stdin.write(password)
+    proc.stdin.end()
+    const exitCode = await proc.exited
+    const stderr = await new Response(proc.stderr).text()
+    if (exitCode !== 0) throw new Error(`${tool} login failed: ${stderr}`)
+  }
 
-    log.info("docker tag", { from: opts.localImage, to: fullPath })
-    await exec(["docker", "tag", opts.localImage, fullPath])
-
-    log.info("docker push", { image: fullPath })
-    const pushOutput = await exec(["docker", "push", fullPath])
-
-    let digest: string | undefined
-    const digestMatch = pushOutput.match(/digest:\s*(sha256:[a-f0-9]+)/i)
-    if (digestMatch) digest = digestMatch[1]
-
-    return { fullPath, digest, warnedDuplicatePath }
+  function extractDigest(output: string): string | undefined {
+    const m = output.match(/digest:\s*(sha256:[a-f0-9]+)/i)
+    return m ? m[1] : undefined
   }
 
   async function exec(cmd: string[]): Promise<string> {
@@ -183,9 +272,11 @@ export namespace InspireHarbor {
     return stdout
   }
 
-  async function checkDocker(): Promise<boolean> {
+  async function checkTool(tool: string): Promise<boolean> {
     try {
-      const proc = Bun.spawn(["docker", "version", "--format", "{{.Client.Version}}"], {
+      // Different tools have different version commands; --version works for
+      // docker/podman/buildah/skopeo. We ignore stdout content.
+      const proc = Bun.spawn([tool, "--version"], {
         stdout: "pipe",
         stderr: "pipe",
       })

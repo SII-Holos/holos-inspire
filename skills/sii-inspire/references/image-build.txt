@@ -117,7 +117,8 @@ RUN pip config set global.index-url http://nexus.sii.shaipower.online/repository
 
 ## Push Workflow (automation)
 
-The `inspire_image_push` tool handles docker login, tag rewriting, and push:
+The `inspire_image_push` tool handles login, tag rewriting, and push with
+automatic fallback across container tools:
 
 ```
 inspire_image_push(
@@ -128,7 +129,28 @@ inspire_image_push(
 )
 ```
 
-After push, **you MUST register the image** or submit will fail with "image not found":
+### Tool fallback order
+
+The tool tries container runtimes in this order until one succeeds:
+
+1. **docker** — most common; needs daemon running
+2. **podman** — docker-CLI-compatible, no daemon needed (good for research clusters)
+3. **buildah** — pairs with `buildah bud` (the recommended build fallback above)
+4. **skopeo** — most flexible; reads from containers-storage or docker-daemon
+
+This means: if you built with `buildah bud --isolation chroot`, the image is
+in buildah's containers-storage — `inspire_image_push` will automatically use
+buildah or skopeo to push it, no Docker daemon required.
+
+### If none of the tools are installed
+
+Ubuntu/Debian: `apt install podman buildah skopeo` (any one works)
+CentOS/RHEL:   `dnf install podman buildah skopeo`
+
+**Last resort** (when no tool is available): use `docker save` / `podman save`
+to export a `.tar` file, then upload via platform UI (镜像管理 → 本地推送 → 上传 tar).
+
+### After push — registration is mandatory
 
 1. Platform UI → 镜像管理 → 新建镜像
 2. Fill 镜像名称 (e.g. `myproject`) and 版本号 (e.g. `v1`) — must match push name/tag exactly
@@ -187,6 +209,8 @@ Do NOT bake large datasets or model weights into the image. Instead:
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `docker build` cgroup error | Shared host, no cgroup access | `buildah bud --isolation chroot` |
+| `inspire_image_push` says 无可用推送工具 | Neither docker nor podman/buildah/skopeo installed | `apt install podman buildah skopeo` (or equivalents) — any one works |
+| Built with buildah, Docker not available | Image is in buildah's containers-storage | `inspire_image_push` auto-falls-back to buildah/skopeo — no change needed |
 | `pip install` timeout | Mainland network, slow upstream | Add Tsinghua mirror or Nexus mirror |
 | `apt-get update` fails | Same as above | Add Tsinghua `sources.list` sed |
 | Base image pull timeout | Large image, slow network | Use Nexus mirror, or pull once in online space |
