@@ -2,22 +2,22 @@ import { InspireCrypto } from "./crypto"
 import { InspireTypes } from "./types"
 import { pluginAuth, pluginCache } from "./ctx"
 
-const KEYCLOAK_BASE = "https://keycloak-inspire-prod.sii.edu.cn"
-const KEYCLOAK_REALM = "inf-internal"
-const KEYCLOAK_ROPC_CLIENT = "admin-cli"
-
-const TOKEN_ENDPOINT = `${KEYCLOAK_BASE}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`
+/**
+ * OpenAPI token endpoint — the only auth path that APISIX gateway accepts
+ * for /api/v2/* calls (as of 2026-05). Keycloak password-grant tokens
+ * (admin-cli client, inf-internal realm) are rejected with 401.
+ *
+ * Response: { code: 0, data: { access_token: "eyJ..." } }
+ * No refresh token — re-login when expired.
+ */
+const OPENAPI_TOKEN_URL = "https://qz.sii.edu.cn/auth/token"
 
 /** Slippage: refresh access_token this many ms before actual expiry */
 const REFRESH_SLIPPAGE_MS = 60_000
 
-interface KeycloakTokenSet {
+interface TokenSet {
   access_token: string
-  refresh_token: string
-  expires_in: number
-  refresh_expires_in: number
   access_expires_at: number
-  refresh_expires_at: number
 }
 
 export namespace InspireAuth {
@@ -65,42 +65,28 @@ export namespace InspireAuth {
     await pluginAuth().set(`harbor${suffix}-password`, password)
   }
 
-  // ── Keycloak token acquisition ─────────────────────────────────
+  // ── OpenAPI token acquisition ──────────────────────────────────
 
   export async function requireToken(): Promise<string> {
     if (cachedToken) return cachedToken
 
-    // Try persisted token set (access + refresh)
+    // Try persisted token
     try {
-      const raw = await pluginCache().get("inspire-keycloak-token")
+      const raw = await pluginCache().get("inspire-openapi-token")
       if (raw && raw !== "") {
-        const cache: KeycloakTokenSet = typeof raw === "string" ? JSON.parse(raw) : raw
-
-        // Access token still valid
+        const cache: TokenSet = typeof raw === "string" ? JSON.parse(raw) : raw
         if (cache.access_expires_at > Date.now() + REFRESH_SLIPPAGE_MS) {
           cachedToken = cache.access_token
           return cache.access_token
         }
-
-        // Access expired but refresh still valid → auto-renew
-        if (cache.refresh_token && cache.refresh_expires_at > Date.now() + REFRESH_SLIPPAGE_MS) {
-          try {
-            const refreshed = await refreshTokenGrant(cache.refresh_token)
-            await persistTokenSet(refreshed)
-            cachedToken = refreshed.access_token
-            return refreshed.access_token
-          } catch {
-            // Refresh failed (revoked / network), fall through to full login
-          }
-        }
       }
     } catch {}
 
-    // Full ROPC login
+    // Full login via OpenAPI /auth/token
     const creds = await getInspireCredentials()
     if (!creds) throw new TokenUnavailableError("inspire_not_authenticated", "not_authenticated")
 
-    const result = await passwordGrant(creds.username, creds.password)
+    const result = await openapiTokenGrant(creds.username, creds.password)
     await persistTokenSet(result)
     cachedToken = result.access_token
     return result.access_token
@@ -110,7 +96,7 @@ export namespace InspireAuth {
    * Force-authenticate with the given credentials, bypassing ALL caches.
    *
    * Unlike `requireToken()`, this never reads in-memory or persisted tokens —
-   * it calls Keycloak's password grant directly. On success, the newly
+   * it calls the OpenAPI /auth/token endpoint directly. On success, the newly
    * acquired token overwrites both caches so subsequent calls use it.
    * On failure, all caches are invalidated to prevent stale tokens from
    * masking the failure.
@@ -122,11 +108,10 @@ export namespace InspireAuth {
    */
   export async function loginWithFreshCredentials(username: string, password: string): Promise<void> {
     try {
-      const result = await passwordGrant(username, password)
+      const result = await openapiTokenGrant(username, password)
       await persistTokenSet(result)
       cachedToken = result.access_token
     } catch (err) {
-      // Invalidate all caches on failure so no stale token can be returned later.
       await invalidateAllTokens()
       throw err
     }
@@ -137,14 +122,12 @@ export namespace InspireAuth {
   }
 
   /**
-   * Invalidate both the in-memory token cache AND the persisted Keycloak
-   * token set. Writes a short-TTL empty value rather than relying on a
-   * `delete` API that may not exist on all PluginCacheStore implementations.
+   * Invalidate both the in-memory token cache AND the persisted token set.
    */
   export async function invalidateAllTokens(): Promise<void> {
     cachedToken = undefined
     try {
-      await pluginCache().set("inspire-keycloak-token", "", 1)
+      await pluginCache().set("inspire-openapi-token", "", 1)
     } catch {
       // Ignore failures — the cached TTL will eventually expire.
     }
@@ -169,46 +152,16 @@ export namespace InspireAuth {
 
   /**
    * Force-acquire a new access token when the current cached one is
-   * rejected by the platform (401). Tries in order:
-   *
-   * 1. Use the persisted refresh_token to hit Keycloak's refresh grant
-   *    (cheap, usually succeeds if refresh is still valid)
-   * 2. Fall back to ROPC password grant with saved credentials
-   *    (bypasses ALL caches — guaranteed fresh if credentials are valid)
-   *
-   * This exists because Keycloak can revoke tokens server-side (admin
-   * action, session limit, backend restart) even when the local
-   * access_expires_at hasn't passed. In that case, simply clearing the
-   * in-memory cachedToken is not enough — requireToken() would still
-   * return the revoked token from pluginCache.
+   * rejected by the platform (401). OpenAPI tokens have no refresh_token —
+   * just re-login with saved credentials.
    */
   export async function forceRefreshToken(): Promise<string> {
     cachedToken = undefined
-
-    // Try refresh grant first
-    try {
-      const raw = await pluginCache().get("inspire-keycloak-token")
-      if (raw && raw !== "") {
-        const cache: KeycloakTokenSet = typeof raw === "string" ? JSON.parse(raw) : raw
-        if (cache.refresh_token && cache.refresh_expires_at > Date.now() + REFRESH_SLIPPAGE_MS) {
-          try {
-            const refreshed = await refreshTokenGrant(cache.refresh_token)
-            await persistTokenSet(refreshed)
-            cachedToken = refreshed.access_token
-            return refreshed.access_token
-          } catch {
-            // Refresh token also revoked — fall through to ROPC
-          }
-        }
-      }
-    } catch {}
-
-    // Fall back to ROPC with saved credentials
     await invalidateAllTokens()
     const creds = await getInspireCredentials()
     if (!creds) throw new TokenUnavailableError("inspire_not_authenticated", "not_authenticated")
 
-    const result = await passwordGrant(creds.username, creds.password)
+    const result = await openapiTokenGrant(creds.username, creds.password)
     await persistTokenSet(result)
     cachedToken = result.access_token
     return result.access_token
@@ -221,8 +174,7 @@ export namespace InspireAuth {
     } catch (err: any) {
       if (isAuthError(err)) {
         // Don't just clear the in-memory cache — the persisted cache
-        // likely holds the same revoked token. Force an actual refresh
-        // against Keycloak.
+        // likely holds the same revoked token. Force a fresh login.
         const freshToken = await forceRefreshToken()
         return await fn(freshToken)
       }
@@ -333,71 +285,59 @@ export namespace InspireAuth {
     }
   }
 
-  // ── Internal: Keycloak grant helpers ───────────────────────────
+  // ── Internal: OpenAPI token grant ──────────────────────────────
 
-  async function passwordGrant(username: string, password: string): Promise<KeycloakTokenSet> {
-    const resp = await fetch(TOKEN_ENDPOINT, {
+  async function openapiTokenGrant(username: string, password: string): Promise<TokenSet> {
+    const resp = await fetch(OPENAPI_TOKEN_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "password",
-        client_id: KEYCLOAK_ROPC_CLIENT,
-        username,
-        password,
-      }).toString(),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
     })
 
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}))
-      if (err.error === "invalid_grant") {
-        throw new TokenUnavailableError("用户名或密码错误", "credentials_invalid")
-      }
       throw new TokenUnavailableError(
-        `Keycloak 登录失败: ${err.error_description ?? err.error ?? resp.status}`,
+        `OpenAPI 登录失败: HTTP ${resp.status}`,
         "unknown",
       )
     }
 
-    return parseTokenResponse(await resp.json())
+    const data = await resp.json()
+    // Response: { code: 0, message: "", data: { access_token: "eyJ..." } }
+    const token = data?.data?.access_token ?? data?.access_token
+    if (!token) {
+      throw new TokenUnavailableError(
+        `OpenAPI 登录失败: 响应中无 access_token (code=${data?.code})`,
+        "credentials_invalid",
+      )
+    }
+
+    return parseTokenResponse(token)
   }
 
-  async function refreshTokenGrant(refreshToken: string): Promise<KeycloakTokenSet> {
-    const resp = await fetch(TOKEN_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: KEYCLOAK_ROPC_CLIENT,
-        refresh_token: refreshToken,
-      }).toString(),
-    })
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}))
-      if (err.error === "invalid_grant") {
-        throw new TokenUnavailableError("登录已过期，请重新运行 synergy inspire login --username <学工号> --password <密码>", "refresh_expired")
+  function parseTokenResponse(accessToken: string): TokenSet {
+    // Decode JWT to get exp
+    let exp = Date.now() + 3600 * 1000 // default 1h
+    try {
+      const payload = accessToken.split(".")[1]
+      // Fix base64url padding
+      const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4)
+      const decoded = JSON.parse(Buffer.from(padded, "base64").toString("utf-8"))
+      if (decoded.exp) {
+        exp = decoded.exp * 1000
       }
-      throw new Error(`refresh_failed: ${err.error_description ?? err.error ?? resp.status}`)
+    } catch {
+      // Fall back to default expiry
     }
 
-    return parseTokenResponse(await resp.json())
-  }
-
-  function parseTokenResponse(data: any): KeycloakTokenSet {
-    const now = Date.now()
     return {
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-      expires_in: data.expires_in ?? 3600,
-      refresh_expires_in: data.refresh_expires_in ?? 604800,
-      access_expires_at: now + (data.expires_in ?? 3600) * 1000,
-      refresh_expires_at: now + (data.refresh_expires_in ?? 604800) * 1000,
+      access_token: accessToken,
+      access_expires_at: exp,
     }
   }
 
-  async function persistTokenSet(tokenSet: KeycloakTokenSet): Promise<void> {
-    const ttl = tokenSet.refresh_expires_in * 1000
-    await pluginCache().set("inspire-keycloak-token", JSON.stringify(tokenSet), ttl)
+  async function persistTokenSet(tokenSet: TokenSet): Promise<void> {
+    const ttl = Math.max(tokenSet.access_expires_at - Date.now(), 60_000)
+    await pluginCache().set("inspire-openapi-token", JSON.stringify(tokenSet), ttl)
   }
 
   // ── Internal: error classification ─────────────────────────────
